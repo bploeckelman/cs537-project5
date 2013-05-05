@@ -1,0 +1,16 @@
+*.o
+*.orig
+*.swp
+*.tmp
+*~
+
+files-list.txt
+
+search-engine
+test
+run-tests.csh
+tags
+
+results/
+scripts/
+
