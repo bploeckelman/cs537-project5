@@ -150,7 +150,6 @@ void* scannerWorker(void *data) {
     // TODO : scan files from file list
 	Info * ip = (Info *) data; 
 	char * line;
-	int i;
 	
 	if((line = malloc(MAXPATH * sizeof(char))) == NULL) {
 		printf("Error allocating memory in scannerWorker\n");
@@ -213,10 +212,10 @@ void startIndexer() {
 	int i; 
 	int rc; 
 	pthread_t * indexer_threads;
-	indexer_threads = (pthread_t *) calloc(args->num_indexer_threads * sizeof(pthread_t));
+	indexer_threads = (pthread_t *) calloc(args.num_indexer_threads, sizeof(pthread_t));
 
-	for (i = 0; i < args->num_indexer_threads; i += 1) {
-		int rc = pthread_create(&indexer_threads[i], NULL, indexerWorker, NULL);
+	for (i = 0; i < args.num_indexer_threads; i += 1) {
+		rc = pthread_create(&indexer_threads[i], NULL, indexerWorker, NULL);
 		assert(rc == 0);
 	}
 	// Do we have to call pthread_join???
