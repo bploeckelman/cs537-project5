@@ -3,10 +3,54 @@
 #include <string.h>
 #include <sys/errno.h>
 #include <math.h>
+#include <pthread.h>
 #include "index.h"
 
-/* Copyright (C) 2002 Christopher Clark <firstname.lastname@cl.cam.ac.uk> */
+void rwlock_rdlock(pthread_rwlock_t *lock) {
+    if (pthread_rwlock_rdlock(lock)) {
+        perror("pthread_rwlock_rdlock");
+        exit(1);
+    } else {
+#ifdef DEBUG
+        printf("Hashtable - read lock acquired\n");
+#endif
+    }
+}
 
+void rwlock_rdunlock(pthread_rwlock_t *lock) {
+    if (pthread_rwlock_unlock(lock)) {
+        perror("pthread_rwlock_rdunlock");
+        exit(1);
+    } else {
+#ifdef DEBUG
+        printf("Hashtable - read lock released\n");
+#endif
+    }
+}
+
+void rwlock_wrlock(pthread_rwlock_t *lock) {
+    if (pthread_rwlock_wrlock(lock)) {
+        perror("pthread_rwlock_wrlock");
+        exit(1);
+    } else {
+#ifdef DEBUG
+        printf("Hashtable - write lock acquired\n");
+#endif
+    }
+}
+
+void rwlock_wrunlock(pthread_rwlock_t *lock) {
+    if (pthread_rwlock_unlock(lock)) {
+        perror("pthread_rwlock_wrunlock");
+        exit(1);
+    } else {
+#ifdef DEBUG
+        printf("Hashtable - write lock released\n");
+#endif
+    }
+}
+
+/* Copyright (C) 2002 Christopher Clark <firstname.lastname@cl.cam.ac.uk> */
 
 struct hashtable;
 
@@ -187,6 +231,9 @@ struct hashtable {
     unsigned int primeindex;
     unsigned int (*hashfn) (void *k);
     int (*eqfn) (void *k1, void *k2);
+    pthread_rwlock_t resizelock;
+    pthread_mutex_t entrycountlock;
+    pthread_rwlock_t *locks;
 };
 
 /*****************************************************************************/
@@ -259,6 +306,25 @@ create_hashtable(unsigned int minsize,
     h->hashfn       = hashf;
     h->eqfn         = eqf;
     h->loadlimit    = (unsigned int) ceil(size * max_load_factor);
+    h->locks        = (pthread_rwlock_t *) malloc(sizeof(pthread_rwlock_t) * size);
+
+    if (pthread_rwlock_init(&h->resizelock, NULL)) {
+        perror("pthread_rwlock_init");
+        return NULL;
+    }
+
+    if (pthread_mutex_init(&h->entrycountlock, NULL)) {
+        perror("pthread_mutex_init");
+        return NULL;
+    }
+
+    for(int i = 0; i < size; ++i) {
+        if (pthread_rwlock_init(&h->locks[i], NULL)) {
+            perror("pthread_rwlock_init");
+            return NULL;
+        }
+    }
+
     return h;
 }
 
@@ -280,6 +346,8 @@ hash(struct hashtable *h, void *k)
 static int
 hashtable_expand(struct hashtable *h)
 {
+    rwlock_wrlock(&h->resizelock);
+
     /* Double the size of the table to accomodate more entries */
     struct entry **newtable;
     struct entry *e;
@@ -332,6 +400,9 @@ hashtable_expand(struct hashtable *h)
     }
     h->tablelength = newsize;
     h->loadlimit   = (unsigned int) ceil(newsize * max_load_factor);
+
+    rwlock_wrunlock(&h->resizelock);
+
     return -1;
 }
 
@@ -339,7 +410,12 @@ hashtable_expand(struct hashtable *h)
 unsigned int
 hashtable_count(struct hashtable *h)
 {
-    return h->entrycount;
+    rwlock_rdlock(&h->resizelock);
+    pthread_mutex_lock(&h->entrycountlock);
+    unsigned int cnt = h->entrycount;
+    pthread_mutex_unlock(&h->entrycountlock);
+    rwlock_rdunlock(&h->resizelock);
+    return cnt;
 }
 
 /*****************************************************************************/
@@ -349,22 +425,46 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
     /* This method allows duplicate keys - but they shouldn't be used */
     unsigned int index;
     struct entry *e;
+    pthread_mutex_lock(&h->entrycountlock);
     if (++(h->entrycount) > h->loadlimit)
     {
         /* Ignore the return value. If expand fails, we should
          * still try cramming just this value into the existing table
          * -- we may not have memory for a larger table, but one more
          * element may be ok. Next time we insert, we'll try expanding again.*/
+        pthread_mutex_unlock(&h->entrycountlock);
         hashtable_expand(h);
     }
+    pthread_mutex_unlock(&h->entrycountlock);
+
     e = (struct entry *)malloc(sizeof(struct entry));
-    if (NULL == e) { --(h->entrycount); return 0; } /*oom*/
+    if (NULL == e) {
+        pthread_mutex_lock(&h->entrycountlock);
+        --(h->entrycount);
+        pthread_mutex_unlock(&h->entrycountlock);
+        return 0;
+    } /*oom*/
+
+    // Acquire global read lock
+    rwlock_rdlock(&h->resizelock);
+
     e->h = hash(h,k);
     index = indexFor(h->tablelength,e->h);
     e->k = k;
     e->v = v;
+
+    // Acquire internal write lock
+    rwlock_wrlock(&h->locks[index]);
+
     e->next = h->table[index];
     h->table[index] = e;
+
+    // Release internal write lock
+    rwlock_wrunlock(&h->locks[index]);
+
+    // Release global read lock
+    rwlock_rdunlock(&h->resizelock);
+
     return -1;
 }
 
@@ -372,10 +472,17 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
 void * /* returns value associated with key */
 hashtable_search(struct hashtable *h, void *k)
 {
+    // Acquire global read lock
+    rwlock_rdlock(&h->resizelock);
+
     struct entry *e;
     unsigned int hashvalue, index;
     hashvalue = hash(h,k);
     index = indexFor(h->tablelength,hashvalue);
+
+    // Acquire local read lock
+    rwlock_rdlock(&h->locks[index]);
+
     e = h->table[index];
     while (NULL != e)
     {
@@ -383,6 +490,12 @@ hashtable_search(struct hashtable *h, void *k)
         if ((hashvalue == e->h) && (h->eqfn(k, e->k))) return e->v;
         e = e->next;
     }
+
+    // Release local read lock
+    rwlock_rdunlock(&h->locks[index]);
+
+    // Release global read lock
+    rwlock_rdunlock(&h->resizelock);
     return NULL;
 }
 
@@ -398,8 +511,15 @@ hashtable_remove(struct hashtable *h, void *k)
     void *v;
     unsigned int hashvalue, index;
 
+    // Acquire global lock
+    rwlock_wrlock(&h->resizelock);
+
     hashvalue = hash(h,k);
     index = indexFor(h->tablelength,hash(h,k));
+
+    // Acquire local write lock
+    rwlock_wrlock(&h->locks[index]);
+
     pE = &(h->table[index]);
     e = *pE;
     while (NULL != e)
@@ -408,7 +528,9 @@ hashtable_remove(struct hashtable *h, void *k)
         if ((hashvalue == e->h) && (h->eqfn(k, e->k)))
         {
             *pE = e->next;
+            pthread_mutex_lock(&h->entrycountlock);
             h->entrycount--;
+            pthread_mutex_unlock(&h->entrycountlock);
             v = e->v;
             freekey(e->k);
             free(e);
@@ -417,6 +539,12 @@ hashtable_remove(struct hashtable *h, void *k)
         pE = &(e->next);
         e = e->next;
     }
+
+    // Release local write lock
+    rwlock_wrunlock(&h->locks[index]);
+    // Release global write lock
+    rwlock_wrunlock(&h->resizelock);
+
     return NULL;
 }
 
@@ -446,6 +574,21 @@ hashtable_destroy(struct hashtable *h, int free_values)
             { f = e; e = e->next; freekey(f->k); free(f); }
         }
     }
+
+    // Destroy locks
+    if (pthread_rwlock_destroy(&h->resizelock)) {
+        perror("pthread_rwlock_destroy");
+    }
+    if (pthread_mutex_destroy(&h->entrycountlock)) {
+        perror("pthread_rwlock_destroy");
+    }
+    for(int i = 0; i < h->tablelength; ++i) {
+        if (pthread_rwlock_destroy(&h->locks[i])) {
+            perror("pthread_rwlock_destroy");
+        }
+    }
+    free(h->locks);
+
     free(h->table);
     free(h);
 }
