@@ -45,9 +45,9 @@ Info info;
 
 
 void parseArgs(int argc, char *argv[]);
-void startScanner(Info info);
+void startScanner();
 // ADDED 
-void initBoundedBuffer();
+char ** initBoundedBuffer();
 void initMutexStruct();
 void startIndexer();
 void startSearch();
@@ -58,13 +58,18 @@ void cleanup();
 // Entry point ----------------------------------------------------------------
 // ----------------------------------------------------------------------------
 int main(int argc, char *argv[]) {
+	int init = init_index();
 	// ADDED 
     parseArgs(argc, argv);
 
 	// ADDED
-	initBoundedBuffer();
+	// info.bbp = initBoundedBuffer();
+	Bounded_Buffer bb =
+		{initBoundedBuffer(), 0, 0, 0, 0, args.num_indexer_threads};
+	info.bbp = &bb; 
+	printf("info.bbp->fill %d\n", info.bbp->fill);
 	initMutexStruct(); 
-    startScanner(info);
+    startScanner();
     startIndexer();
     startSearch();
     cleanup();
@@ -79,7 +84,7 @@ void usage() {
 }
 
 //-----------------------------------------------------------------------------
-void initBoundedBuffer() {
+char ** initBoundedBuffer() {
 	char ** buffer;
 	int i;
 
@@ -89,9 +94,7 @@ void initBoundedBuffer() {
 		buffer[i] = malloc(sizeof(char) * MAXPATH);
 		memset(buffer[i], 0, MAXPATH);
 	} 
-
-	Bounded_Buffer bb = {buffer, 0, 0, 0, 0, args.num_indexer_threads};
-	info.bbp = &bb;
+	return buffer; 
 }
 
 //-----------------------------------------------------------------------------
@@ -141,8 +144,10 @@ void parseArgs(int argc, char *argv[]) {
 
 void add_to_buffer(char * filename) {
 	printf("in add_to_buffer and filename = %s\n", filename);
+
+	printf("in add_to_buffer and info.bbp->fill = %d\n", info.bbp->fill);
 	info.bbp->buffer[info.bbp->fill] = filename;
-	info.bbp->fill = (info.bbp->fill) % info.bbp->size;
+	info.bbp->fill = (info.bbp->fill + 1) % info.bbp->size;
 	info.bbp->count++;
 }
 
@@ -173,9 +178,9 @@ void* scannerWorker(void *data) {
     return NULL;
 }
 
-void startScanner(Info info) {
+void startScanner() {
     // TODO : start scanner thread
-	printf("call scannerWorder\n");
+	printf("call scannerWorder info.bbp->fill = %d\n", info.bbp->fill);
 	pthread_t scanner_thread;
 	int rc;
 	rc = pthread_create(&scanner_thread, NULL, scannerWorker, &info);
@@ -184,23 +189,41 @@ void startScanner(Info info) {
 }
 
 // ----------------------------------------------------------------------------
+
+char * get_from_buffer() {
+	char * file = info.bbp->buffer[info.bbp->use];
+	info.bbp->use = (info.bbp->use + 1) % info.bbp->size; 
+	info.bbp->count--;
+	return file; 
+}
+
 void* indexerWorker(void *data) {
     // TODO : read files from list produced by scanner, add words to hash table
-/*
+	// Not sure about this, but here it goes:
+	int BUFFER_SIZE = 1024;
+	char buffer[BUFFER_SIZE];
+	pthread_mutex_lock(&mutex_cond.bb_mutex);
+	while (info.bbp->count == 0) {
+		pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex);
+	}
+	char * filename = get_from_buffer();
+	printf("filename = %s\n", filename);
+	pthread_cond_signal(&mutex_cond.full);
+	pthread_mutex_unlock(&mutex_cond.bb_mutex);
+
     FILE *file = fopen(filename, "r");
     while (!feof(file)) {
         int line_number = 0;
         char *saveptr;
-        fgets(buffer, buffer_len, file);
+        fgets(buffer, BUFFER_SIZE, file);
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
-            insert_into_index(word, file_name, line_number);
+            insert_into_index(word, filename, line_number);
             word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         }
         ++line_number;
     }
     fclose(file);
-*/
     return NULL;
 }
 
@@ -209,6 +232,7 @@ void startIndexer() {
 
 	// HOW TO DO THIS?
 	// Give it a shot here
+	printf("startIndexer()\n");
 	int i; 
 	int rc; 
 	pthread_t * indexer_threads;
