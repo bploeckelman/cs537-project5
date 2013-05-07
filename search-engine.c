@@ -159,8 +159,6 @@ void parseArgs(int argc, char *argv[]) {
 
 // ----------------------------------------------------------------------------
 void add_to_buffer(char * filename) {
-    printf("[%.8x scanner] in add_to_buffer: filename = '%s' fill = %d.\n",
-        pthread_self(), filename, info.bbp->fill);
     strcpy(info.bbp->buffer[info.bbp->fill], filename);
 	//info.bbp->buffer[info.bbp->fill] = filename;
 	info.bbp->fill = (info.bbp->fill + 1) % info.bbp->size;
@@ -189,10 +187,11 @@ void* scannerWorker(void *data) {
 			pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex); 
 		}
 
-		add_to_buffer(line);
 #ifdef DEBUG
-        printf("[%.8x scanner] added '%s' to buffer.\n", pthread_self(), line);
+        printf("[%.8x scanner] add_to_buffer[%d] '%s'\n",
+            pthread_self(), info.bbp->fill, line);
 #endif
+		add_to_buffer(line);
 
         printf("[%.8x scanner] signalling full condition...\n", pthread_self());
 		pthread_cond_signal(&mutex_cond.full);
@@ -202,6 +201,9 @@ void* scannerWorker(void *data) {
             perror("pthread_mutex_unlock()");
         }
 	}
+
+    printf("[%.8x scanner] finished fetching lines from '%s'.\n", pthread_self(), args.file_list_name);
+    fclose(info.file_list);
 	
     return NULL;
 }
@@ -222,8 +224,7 @@ void startScanner() {
 // ----------------------------------------------------------------------------
 char * get_from_buffer() {
 	char * file = info.bbp->buffer[info.bbp->use];
-    printf("[%.8x indexer] in get_from_buffer: filename = '%s' use = %d.\n",
-        pthread_self(), file, info.bbp->use);
+    printf("[%.8x indexer] get_from_buffer[%d] '%s'\n", pthread_self(), info.bbp->use, file);
 	info.bbp->use = (info.bbp->use + 1) % info.bbp->size; 
 	info.bbp->count--;
 	return file; 
@@ -243,7 +244,7 @@ void* indexerWorker(void *data) {
 	}
 
 	char * filename = get_from_buffer();
-    printf("[%.8x indexer] got filename '%s' from buffer, signalling full...\n", pthread_self(), filename);
+    printf("[%.8x indexer] signalling full condition...\n", pthread_self(), filename);
 	pthread_cond_signal(&mutex_cond.full);
     printf("[%.8x indexer] unlocking buffer mutex...\n", pthread_self());
 	pthread_mutex_unlock(&mutex_cond.bb_mutex);
@@ -288,19 +289,21 @@ void startIndexers() {
 // ----------------------------------------------------------------------------
 void startSearch() {
     // TODO : get search terms and check them against hash table
+    printf("Starting search...\n");
 }
 
 // ----------------------------------------------------------------------------
 void cleanup() {
-    // Close the file list
-    // NOTE: this could be done by the scanner thread when its finished
-    fclose(info.file_list);
+    // Join the scanner thread
+    pthread_join(info.scanner_thread, NULL);
 
     // Join any remaining indexer threads and free the array of threads
-    for (int i = 0; i < args.num_indexer_threads; ++i) {
-        pthread_join(info.indexer_threads[i], NULL);
+    if (info.indexer_threads != NULL) {
+        for (int i = 0; i < args.num_indexer_threads; ++i) {
+            pthread_join(info.indexer_threads[i], NULL);
+        }
+        free(info.indexer_threads);
     }
-    free(info.indexer_threads);
 
     for (int i = 0; i < BOUNDED_BUFFER_SIZE; ++i) {
         free(info.bbp->buffer[i]);
