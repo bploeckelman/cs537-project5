@@ -259,7 +259,7 @@ void* indexerWorker(void *data) {
 
     printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
     FILE *file = fopen(filename, "r");
-    int line_number = 0;
+    int line_number = 1;
     while (!feof(file)) {
         fgets(buffer, MAXPATH, file);
         char *saveptr;
@@ -302,6 +302,29 @@ void startIndexers() {
 void startSearch() {
     // TODO : get search terms and check them against hash table
     printf("Starting search...\n");
+
+    int BUFFER_SIZE = 1024;
+    char word[BUFFER_SIZE];
+    memset(word, 0, sizeof(char) * BUFFER_SIZE);
+
+    while (fgets(word, BUFFER_SIZE, stdin)) {
+        if (word[strlen(word) - 1] == '\n') {
+            word[strlen(word) - 1] = '\0';
+        }
+
+        printf("input: '%s'\n", word); 
+        index_search_results_t *results = find_in_index(word);
+        if (results) {
+            printf("%d results found...\n", results->num_results);
+            for (int i = 0; i < results->num_results; ++i) {
+                index_search_elem_t *result = &results->results[i];
+                printf("FOUND: %s %d\n", result->file_name, result->line_number);
+            }
+        } else {
+            printf("Word not found\n");
+        }
+        memset(word, 0, sizeof(char) * BUFFER_SIZE);
+    }
 }
 
 // ----------------------------------------------------------------------------
