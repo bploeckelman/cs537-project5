@@ -6,6 +6,8 @@
 #include <pthread.h>
 #include "index.h"
 
+#define DEBUG
+
 void rwlock_rdlock(pthread_rwlock_t *lock) {
     if (pthread_rwlock_rdlock(lock)) {
         perror("pthread_rwlock_rdlock");

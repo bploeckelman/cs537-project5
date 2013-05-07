@@ -82,8 +82,6 @@ void initMutexStruct() {
         fprintf(stderr, "Failed to initialize full condition variable.\n");
         exit(1);
     }
-    // Signal the empty condition
-    pthread_cond_signal(&mutex_cond.empty);
 }
 
 //-----------------------------------------------------------------------------
@@ -91,9 +89,9 @@ void initBoundedBuffer() {
     // Allocate and initialize the Bounded_Buffer struct
     info.bbp = (Bounded_Buffer *) malloc(sizeof(Bounded_Buffer));
     memset(info.bbp, 0, sizeof(Bounded_Buffer));
+    info.bbp->size = BOUNDED_BUFFER_SIZE;
 
     // Allocate and initialize the buffer
-    //info.bbp->buffer = initBoundedBuffer();
     info.bbp->buffer = (char **) malloc(sizeof(char *) * BOUNDED_BUFFER_SIZE);
     for (int i = 0; i < BOUNDED_BUFFER_SIZE; ++i) {
         info.bbp->buffer[i] = (char *) malloc(sizeof(char) * MAXPATH);
@@ -161,10 +159,10 @@ void parseArgs(int argc, char *argv[]) {
 
 // ----------------------------------------------------------------------------
 void add_to_buffer(char * filename) {
-	printf("in add_to_buffer: filename = '%s',  info.bbp->fill = %d\n",
-        filename, info.bbp->fill);
-    // TODO: strcpy?
-	info.bbp->buffer[info.bbp->fill] = filename;
+    printf("[%.8x scanner] in add_to_buffer: filename = '%s' fill = %d.\n",
+        pthread_self(), filename, info.bbp->fill);
+    strcpy(info.bbp->buffer[info.bbp->fill], filename);
+	//info.bbp->buffer[info.bbp->fill] = filename;
 	info.bbp->fill = (info.bbp->fill + 1) % info.bbp->size;
 	info.bbp->count++;
 }
@@ -186,7 +184,7 @@ void* scannerWorker(void *data) {
 		if (pthread_mutex_lock(&mutex_cond.bb_mutex)) {
             perror("pthread_mutex_lock()");
         }
-		while (info.bbp->count == info.bbp->size) {
+		while (info.bbp->count == BOUNDED_BUFFER_SIZE) { //info.bbp->size) {
             printf("[%.8x scanner] waiting on buffer empty condition...\n", pthread_self());
 			pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex); 
 		}
@@ -217,13 +215,15 @@ void startScanner() {
         exit(1);
     }
 #ifdef DEBUG
-    printf("[%.8x scanner] created scanner thread #0.\n", pthread_self());
+    printf("[%.8x main] created scanner thread #0.\n", pthread_self());
 #endif
 }
 
 // ----------------------------------------------------------------------------
 char * get_from_buffer() {
 	char * file = info.bbp->buffer[info.bbp->use];
+    printf("[%.8x indexer] in get_from_buffer: filename = '%s' use = %d.\n",
+        pthread_self(), file, info.bbp->use);
 	info.bbp->use = (info.bbp->use + 1) % info.bbp->size; 
 	info.bbp->count--;
 	return file; 
@@ -234,9 +234,10 @@ void* indexerWorker(void *data) {
 	// Not sure about this, but here it goes:
 	int BUFFER_SIZE = 1024;
 	char buffer[BUFFER_SIZE];
+
     printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
-	while (info.bbp->count == 0) {
+    while (info.bbp->count == 0) {
         printf("[%.8x indexer] waiting on buffer full condition...\n", pthread_self());
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
@@ -249,16 +250,16 @@ void* indexerWorker(void *data) {
 
     printf("[%.8x indexer] attempting to open file '%s'...\n", pthread_self(), filename);
     FILE *file = fopen(filename, "r");
+    int line_number = 0;
     while (!feof(file)) {
-        int line_number = 0;
         char *saveptr;
         fgets(buffer, BUFFER_SIZE, file);
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
-            insert_into_index(word, filename, line_number);
 #ifdef DEBUG
-            printf("[%.8x indexer] inserted '%s' into index.\n", pthread_self(), word);
+            printf("[%.8x indexer] inserting '%s' into index...\n", pthread_self(), word);
 #endif
+            insert_into_index(word, filename, line_number);
             word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         }
         ++line_number;
@@ -278,7 +279,7 @@ void startIndexers() {
             fprintf(stderr, "Failed to create indexer thread #%d.\n", i);
         } else {
 #ifdef DEBUG
-            printf("[%.8x indexer] created indexer thread #%d.\n", pthread_self(), i);
+            printf("[%.8x main] created indexer thread #%d.\n", pthread_self(), i);
 #endif
         }
 	}
