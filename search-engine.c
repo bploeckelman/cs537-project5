@@ -39,6 +39,8 @@ typedef struct tag_info {
 	bounded_buffer_t bbp; 
     pthread_t scanner_thread;
     pthread_t *indexer_threads;
+    int scan_complete;
+    int files_indexed;
 } Info;
 Info info;
 
@@ -204,6 +206,7 @@ void* scannerWorker(void *data) {
 
     printf("[%.8x scanner] finished fetching lines from '%s'.\n", pthread_self(), args.file_list_name);
     fclose(info.file_list);
+    info.scan_complete = 1;
 	
     return NULL;
 }
@@ -236,9 +239,14 @@ void* indexerWorker(void *data) {
 	int BUFFER_SIZE = 1024;
 	char buffer[BUFFER_SIZE];
 
+    GetNext:
     printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
+        if (info.scan_complete) {
+            // no more files to scan, exit indexer thread
+            return NULL;
+        }
         printf("[%.8x indexer] waiting on buffer full condition...\n", pthread_self());
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
@@ -252,12 +260,13 @@ void* indexerWorker(void *data) {
     printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
     FILE *file = fopen(filename, "r");
     int line_number = 0;
-	while (NULL != fgets(buffer, MAXPATH, file)) {
+    while (!feof(file)) {
+        fgets(buffer, MAXPATH, file);
         char *saveptr;
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
 #ifdef DEBUG
-            printf("[%.8x indexer] inserting '%s' into index...\n", pthread_self(), word);
+            printf("[%.8x indexer] checking if '%s' is already in index...\n", pthread_self(), word);
 #endif
             insert_into_index(word, filename, line_number);
             word = strtok_r(NULL, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
@@ -265,7 +274,10 @@ void* indexerWorker(void *data) {
         ++line_number;
     }
     printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
+    info.files_indexed++;
     fclose(file);
+
+    goto GetNext;
     return NULL;
 }
 
@@ -304,6 +316,7 @@ void cleanup() {
         }
         free(info.indexer_threads);
     }
+    printf("\n\nFiles indexed: %d\n", info.files_indexed);
 
     for (int i = 0; i < BOUNDED_BUFFER_SIZE; ++i) {
         free(info.bbp->buffer[i]);
