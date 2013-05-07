@@ -252,17 +252,15 @@ void* indexerWorker(void *data) {
     printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
     FILE *file = fopen(filename, "r");
     int line_number = 0;
-    //while (!feof(file)) {
 	while (NULL != fgets(buffer, MAXPATH, file)) {
         char *saveptr;
-        //fgets(buffer, BUFFER_SIZE, file);
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
 #ifdef DEBUG
             printf("[%.8x indexer] inserting '%s' into index...\n", pthread_self(), word);
 #endif
             insert_into_index(word, filename, line_number);
-            word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
+            word = strtok_r(NULL, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         }
         ++line_number;
     }
