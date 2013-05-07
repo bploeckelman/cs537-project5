@@ -417,13 +417,13 @@ hashtable_count(struct hashtable *h)
     printf("count: global : ");
     rwlock_rdlock(&h->globallock);
 
-    printf("count: entrycnt : ");
-    pthread_mutex_lock(&h->entrycountlock);
+    //printf("count: entrycnt : ");
+    //pthread_mutex_lock(&h->entrycountlock);
 
     unsigned int cnt = h->entrycount;
 
-    printf("count: entrycnt : ");
-    pthread_mutex_unlock(&h->entrycountlock);
+    //printf("count: entrycnt : ");
+    //pthread_mutex_unlock(&h->entrycountlock);
 
     printf("count: global : ");
     rwlock_rdunlock(&h->globallock);
@@ -435,43 +435,49 @@ hashtable_count(struct hashtable *h)
 int
 hashtable_insert(struct hashtable *h, void *k, void *v)
 {
+    // Acquire global write lock
+    printf("insert: global : ");
+    rwlock_wrlock(&h->globallock);
+
     /* This method allows duplicate keys - but they shouldn't be used */
     unsigned int index;
     struct entry *e;
-    printf("insert: entrycnt : ");
-    pthread_mutex_lock(&h->entrycountlock);
+    //printf("insert: entrycnt : ");
+    //pthread_mutex_lock(&h->entrycountlock);
     if (++(h->entrycount) > h->loadlimit)
     {
         /* Ignore the return value. If expand fails, we should
          * still try cramming just this value into the existing table
          * -- we may not have memory for a larger table, but one more
          * element may be ok. Next time we insert, we'll try expanding again.*/
-        printf("insert: entrycnt : ");
-        pthread_mutex_unlock(&h->entrycountlock);
+        //printf("insert: entrycnt : ");
+        //pthread_mutex_unlock(&h->entrycountlock);
 
         hashtable_expand(h);
 
-        printf("insert: entrycnt : ");
-        pthread_mutex_lock(&h->entrycountlock);
+        //printf("insert: entrycnt : ");
+        //pthread_mutex_lock(&h->entrycountlock);
     }
-    printf("insert: entrycnt : ");
-    pthread_mutex_unlock(&h->entrycountlock);
+    //printf("insert: entrycnt : ");
+    //pthread_mutex_unlock(&h->entrycountlock);
 
     e = (struct entry *)malloc(sizeof(struct entry));
     if (NULL == e) {
-        printf("insert: entrycnt : ");
-        pthread_mutex_lock(&h->entrycountlock);
+        //printf("insert: entrycnt : ");
+        //pthread_mutex_lock(&h->entrycountlock);
 
         --(h->entrycount);
 
-        printf("insert: entrycnt : ");
-        pthread_mutex_unlock(&h->entrycountlock);
+        //printf("insert: entrycnt : ");
+        //pthread_mutex_unlock(&h->entrycountlock);
+        printf("insert: global : ");
+        rwlock_wrunlock(&h->globallock);
         return 0;
     } /*oom*/
 
     // Acquire global read lock
-    printf("insert: global : ");
-    rwlock_rdlock(&h->globallock);
+    //printf("insert: global : ");
+    //rwlock_rdlock(&h->globallock);
 
     e->h = hash(h,k);
     index = indexFor(h->tablelength,e->h);
@@ -479,19 +485,20 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
     e->v = v;
 
     // Acquire internal write lock
-    printf("insert: local : ");
-    rwlock_wrlock(&h->locks[index]);
+    //printf("insert: local : ");
+    //rwlock_wrlock(&h->locks[index]);
 
+    printf("[%.8x indexer] inserting '%s' into index...\n", pthread_self(), k);
     e->next = h->table[index];
     h->table[index] = e;
 
     // Release internal write lock
-    printf("insert: local : ");
-    rwlock_wrunlock(&h->locks[index]);
+    //printf("insert: local : ");
+    //rwlock_wrunlock(&h->locks[index]);
 
-    // Release global read lock
+    // Release global write lock
     printf("insert: global : ");
-    rwlock_rdunlock(&h->globallock);
+    rwlock_wrunlock(&h->globallock);
 
     return -1;
 }
@@ -501,8 +508,12 @@ void * /* returns value associated with key */
 hashtable_search(struct hashtable *h, void *k)
 {
     // Acquire global read lock
-    printf("search: global : ");
-    rwlock_rdlock(&h->globallock);
+    //printf("search: global : ");
+    //rwlock_rdlock(&h->globallock);
+    if (pthread_rwlock_rdlock(&h->globallock)) {
+        perror("pthread_rwlock_rdlock");
+        exit(1);
+    }
 
     struct entry *e;
     unsigned int hashvalue, index;
@@ -510,24 +521,37 @@ hashtable_search(struct hashtable *h, void *k)
     index = indexFor(h->tablelength,hashvalue);
 
     // Acquire local read lock
-    printf("search: local : ");
-    rwlock_rdlock(&h->locks[index]);
+    //printf("search: local : ");
+    //rwlock_rdlock(&h->locks[index]);
 
     e = h->table[index];
     while (NULL != e)
     {
         /* Check hash value to short circuit heavier comparison */
-        if ((hashvalue == e->h) && (h->eqfn(k, e->k))) return e->v;
+        if ((hashvalue == e->h) && (h->eqfn(k, e->k))) {
+            // Release global read lock
+            //printf("search: global : ");
+            //rwlock_rdunlock(&h->globallock);
+            if (pthread_rwlock_unlock(&h->globallock)) {
+                perror("pthread_rwlock_unlock");
+                exit(1);
+            }
+            return e->v;
+        }
         e = e->next;
     }
 
     // Release local read lock
-    printf("search: local : ");
-    rwlock_rdunlock(&h->locks[index]);
+    //printf("search: local : ");
+    //rwlock_rdunlock(&h->locks[index]);
 
     // Release global read lock
-    printf("search: global : ");
-    rwlock_rdunlock(&h->globallock);
+    //printf("search: global : ");
+    //rwlock_rdunlock(&h->globallock);
+    if (pthread_rwlock_unlock(&h->globallock)) {
+        perror("pthread_rwlock_unlock");
+        exit(1);
+    }
 
     return NULL;
 }
@@ -536,6 +560,10 @@ hashtable_search(struct hashtable *h, void *k)
 void * /* returns value associated with key */
 hashtable_remove(struct hashtable *h, void *k)
 {
+    // Acquire global lock
+    printf("remove: global : ");
+    rwlock_wrlock(&h->globallock);
+
     /* TODO: consider compacting the table when the load factor drops enough,
      *       or provide a 'compact' method. */
 
@@ -545,15 +573,15 @@ hashtable_remove(struct hashtable *h, void *k)
     unsigned int hashvalue, index;
 
     // Acquire global lock
-    printf("remove: global : ");
-    rwlock_wrlock(&h->globallock);
+    //printf("remove: global : ");
+    //rwlock_wrlock(&h->globallock);
 
     hashvalue = hash(h,k);
     index = indexFor(h->tablelength,hash(h,k));
 
     // Acquire local write lock
-    printf("remove: local : ");
-    rwlock_wrlock(&h->locks[index]);
+    //printf("remove: local : ");
+    //rwlock_wrlock(&h->locks[index]);
 
     pE = &(h->table[index]);
     e = *pE;
@@ -563,13 +591,13 @@ hashtable_remove(struct hashtable *h, void *k)
         if ((hashvalue == e->h) && (h->eqfn(k, e->k)))
         {
             *pE = e->next;
-            printf("remove: entrycnt : ");
-            pthread_mutex_lock(&h->entrycountlock);
+            //printf("remove: entrycnt : ");
+            //pthread_mutex_lock(&h->entrycountlock);
 
             h->entrycount--;
 
-            printf("remove: entrycnt : ");
-            pthread_mutex_unlock(&h->entrycountlock);
+            //printf("remove: entrycnt : ");
+            //pthread_mutex_unlock(&h->entrycountlock);
             v = e->v;
             freekey(e->k);
             free(e);
@@ -580,8 +608,8 @@ hashtable_remove(struct hashtable *h, void *k)
     }
 
     // Release local write lock
-    printf("remove: local : ");
-    rwlock_wrunlock(&h->locks[index]);
+    //printf("remove: local : ");
+    //rwlock_wrunlock(&h->locks[index]);
 
     // Release global write lock
     printf("remove: global : ");
