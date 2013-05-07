@@ -244,17 +244,18 @@ void* indexerWorker(void *data) {
 	}
 
 	char * filename = get_from_buffer();
-    printf("[%.8x indexer] signalling full condition...\n", pthread_self(), filename);
-	pthread_cond_signal(&mutex_cond.full);
+    printf("[%.8x indexer] signalling empty condition...\n", pthread_self(), filename);
+	pthread_cond_signal(&mutex_cond.empty);
     printf("[%.8x indexer] unlocking buffer mutex...\n", pthread_self());
 	pthread_mutex_unlock(&mutex_cond.bb_mutex);
 
-    printf("[%.8x indexer] attempting to open file '%s'...\n", pthread_self(), filename);
+    printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
     FILE *file = fopen(filename, "r");
     int line_number = 0;
-    while (!feof(file)) {
+    //while (!feof(file)) {
+	while (NULL != fgets(buffer, MAXPATH, file)) {
         char *saveptr;
-        fgets(buffer, BUFFER_SIZE, file);
+        //fgets(buffer, BUFFER_SIZE, file);
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
 #ifdef DEBUG
@@ -265,6 +266,7 @@ void* indexerWorker(void *data) {
         }
         ++line_number;
     }
+    printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
     fclose(file);
     return NULL;
 }
