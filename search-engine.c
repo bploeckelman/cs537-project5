@@ -9,6 +9,7 @@
 #include "index.h"
 
 #define DEBUG
+#define BOUNDED_BUFFER_SIZE 32
 
 typedef struct bounded_buffer_s {
 	char ** buffer;
@@ -66,19 +67,6 @@ int main(int argc, char *argv[]) {
 
 
 //-----------------------------------------------------------------------------
-char ** initBoundedBuffer() {
-	char **buffer = malloc(sizeof(char *) * args.num_indexer_threads);
-	
-    // TODO : is this supposed to be MAXPATH + 2 for \n\0 ?
-	for(int i = 0; i < args.num_indexer_threads; ++i) {
-		buffer[i] = malloc(sizeof(char) * MAXPATH);
-		memset(buffer[i], 0, MAXPATH);
-	} 
-
-	return buffer; 
-}
-
-//-----------------------------------------------------------------------------
 void initMutexStruct() {
 	memset(&mutex_cond, 0, sizeof(Mutex_Cond));
 
@@ -94,6 +82,32 @@ void initMutexStruct() {
         fprintf(stderr, "Failed to initialize full condition variable.\n");
         exit(1);
     }
+    // Signal the empty condition
+    pthread_cond_signal(&mutex_cond.empty);
+}
+
+//-----------------------------------------------------------------------------
+void initBoundedBuffer() {
+    // Allocate and initialize the Bounded_Buffer struct
+    info.bbp = (Bounded_Buffer *) malloc(sizeof(Bounded_Buffer));
+    memset(info.bbp, 0, sizeof(Bounded_Buffer));
+
+    // Allocate and initialize the buffer
+    //info.bbp->buffer = initBoundedBuffer();
+    info.bbp->buffer = (char **) malloc(sizeof(char *) * BOUNDED_BUFFER_SIZE);
+    for (int i = 0; i < BOUNDED_BUFFER_SIZE; ++i) {
+        info.bbp->buffer[i] = (char *) malloc(sizeof(char) * MAXPATH);
+        // TODO : is this supposed to be MAXPATH + 2 for \n\0 ?
+        memset(info.bbp->buffer[i], 0, MAXPATH);
+    }
+#ifdef DEBUG
+    printf("info.bbp->buffer = %p\n", info.bbp->buffer);
+	printf("info.bbp->fill  = %d\n", info.bbp->fill);
+	printf("info.bbp->use   = %d\n", info.bbp->use);
+	printf("info.bbp->count = %d\n", info.bbp->count);
+	printf("info.bbp->done  = %d\n", info.bbp->done);
+	printf("info.bbp->size  = %d\n", info.bbp->size);
+#endif
 }
 
 //-----------------------------------------------------------------------------
@@ -103,11 +117,7 @@ void initialize() {
         exit(1);
     }
 
-	// info.bbp = initBoundedBuffer();
-	Bounded_Buffer bb =
-		{initBoundedBuffer(), 0, 0, 0, 0, args.num_indexer_threads};
-	info.bbp = &bb; 
-	printf("info.bbp->fill %d\n", info.bbp->fill);
+    initBoundedBuffer();
 	initMutexStruct(); 
 }
 
@@ -153,44 +163,62 @@ void parseArgs(int argc, char *argv[]) {
 void add_to_buffer(char * filename) {
 	printf("in add_to_buffer: filename = '%s',  info.bbp->fill = %d\n",
         filename, info.bbp->fill);
+    // TODO: strcpy?
 	info.bbp->buffer[info.bbp->fill] = filename;
 	info.bbp->fill = (info.bbp->fill + 1) % info.bbp->size;
 	info.bbp->count++;
 }
 
+// Scan files from file list
 void* scannerWorker(void *data) {
-    // TODO : scan files from file list
-	Info * ip = (Info *) data; 
 	char * line;
-	
 	if((line = malloc(MAXPATH * sizeof(char))) == NULL) {
-		printf("Error allocating memory in scannerWorker\n");
+		fprintf(stderr, "Failed to allocate memory for file path.\n");
 		exit(1);
 	}
 
-	while ((line = fgets(line, MAXPATH, ip->file_list)) != NULL) {
+	while (NULL != fgets(line, MAXPATH, info.file_list)) {
 		if (line[strlen(line) - 1] == '\n')
 			line[strlen(line) - 1] = 0;
+        printf("[%.8x scanner] got line '%s' from file list.\n", pthread_self(), line);
 
-		pthread_mutex_lock(&mutex_cond.bb_mutex);
-		while (ip->bbp->count == ip->bbp->size) {
+        printf("[%.8x scanner] locking buffer mutex...\n", pthread_self());
+		if (pthread_mutex_lock(&mutex_cond.bb_mutex)) {
+            perror("pthread_mutex_lock()");
+        }
+		while (info.bbp->count == info.bbp->size) {
+            printf("[%.8x scanner] waiting on buffer empty condition...\n", pthread_self());
 			pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex); 
 		}
 
 		add_to_buffer(line);
+#ifdef DEBUG
+        printf("[%.8x scanner] added '%s' to buffer.\n", pthread_self(), line);
+#endif
+
+        printf("[%.8x scanner] signalling full condition...\n", pthread_self());
 		pthread_cond_signal(&mutex_cond.full);
-		pthread_mutex_unlock(&mutex_cond.bb_mutex); 
+
+        printf("[%.8x scanner] unlocking buffer mutex...\n", pthread_self());
+		if (pthread_mutex_unlock(&mutex_cond.bb_mutex)) {
+            perror("pthread_mutex_unlock()");
+        }
 	}
 	
     return NULL;
 }
 
 void startScanner() {
-	printf("call scannerWorder info.bbp->fill = %d\n", info.bbp->fill);
+#ifdef DEBUG
+	printf("startScanner()\n");
+#endif
 	if (pthread_create(&info.scanner_thread, NULL, scannerWorker, NULL)) {
         fprintf(stderr, "Failed to create scaner thread.\n");
         exit(1);
     }
+#ifdef DEBUG
+    printf("[%.8x scanner] created scanner thread #0.\n", pthread_self());
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -206,15 +234,20 @@ void* indexerWorker(void *data) {
 	// Not sure about this, but here it goes:
 	int BUFFER_SIZE = 1024;
 	char buffer[BUFFER_SIZE];
+    printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
 	while (info.bbp->count == 0) {
-		pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex);
+        printf("[%.8x indexer] waiting on buffer full condition...\n", pthread_self());
+		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
+
 	char * filename = get_from_buffer();
-	printf("filename = %s\n", filename);
+    printf("[%.8x indexer] got filename '%s' from buffer, signalling full...\n", pthread_self(), filename);
 	pthread_cond_signal(&mutex_cond.full);
+    printf("[%.8x indexer] unlocking buffer mutex...\n", pthread_self());
 	pthread_mutex_unlock(&mutex_cond.bb_mutex);
 
+    printf("[%.8x indexer] attempting to open file '%s'...\n", pthread_self(), filename);
     FILE *file = fopen(filename, "r");
     while (!feof(file)) {
         int line_number = 0;
@@ -223,6 +256,9 @@ void* indexerWorker(void *data) {
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
             insert_into_index(word, filename, line_number);
+#ifdef DEBUG
+            printf("[%.8x indexer] inserted '%s' into index.\n", pthread_self(), word);
+#endif
             word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         }
         ++line_number;
@@ -233,13 +269,17 @@ void* indexerWorker(void *data) {
 
 void startIndexers() {
 #ifdef DEBUG
-	printf("startIndexer()\n");
+	printf("startIndexers()\n");
 #endif
 
     info.indexer_threads = (pthread_t *) calloc(args.num_indexer_threads, sizeof(pthread_t));
 	for (int i = 0; i < args.num_indexer_threads; ++i) {
 		if (pthread_create(&info.indexer_threads[i], NULL, indexerWorker, NULL)) {
             fprintf(stderr, "Failed to create indexer thread #%d.\n", i);
+        } else {
+#ifdef DEBUG
+            printf("[%.8x indexer] created indexer thread #%d.\n", pthread_self(), i);
+#endif
         }
 	}
 }
@@ -260,5 +300,11 @@ void cleanup() {
         pthread_join(info.indexer_threads[i], NULL);
     }
     free(info.indexer_threads);
+
+    for (int i = 0; i < BOUNDED_BUFFER_SIZE; ++i) {
+        free(info.bbp->buffer[i]);
+    }
+    free(info.bbp->buffer);
+    free(info.bbp);
 }
 

@@ -1,5 +1,5 @@
 CC=gcc
-FLAGS=-pthread --std=gnu99 -ggdb3 -Wall -lm
+FLAGS=-pthread --std=gnu99 -ggdb3 -Wall -Wno-format -lm
 REGEN_TAGS=@echo "regenerating tags..." && ctags -R
 REGEN_LIST=@echo "regenerating file list..." && ./listgen.sh
 
