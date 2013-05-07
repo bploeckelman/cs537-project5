@@ -453,8 +453,15 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
         //printf("insert: entrycnt : ");
         //pthread_mutex_unlock(&h->entrycountlock);
 
+        // Release global write lock for expand
+        printf("insert: global : ");
+        rwlock_wrunlock(&h->globallock);
+
         hashtable_expand(h);
 
+        // Acquire global write lock
+        printf("insert: global : ");
+        rwlock_wrlock(&h->globallock);
         //printf("insert: entrycnt : ");
         //pthread_mutex_lock(&h->entrycountlock);
     }
