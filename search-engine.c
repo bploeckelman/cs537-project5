@@ -68,7 +68,7 @@ struct stringnode* indexedfilelist;
 struct stringnode* endofindexedfilelist;
 char* searchfor;
 int indexcomplete;
-pthread_cond_t * searchcomplete;
+pthread_cond_t  searchcomplete;
 
 // ----------------------------------------------------------------------------
 // Entry point ----------------------------------------------------------------
@@ -77,8 +77,13 @@ int main(int argc, char *argv[]) {
     parseArgs(argc, argv);
 
     initialize();
+	printf("here\n");
     startScanner();
+
+	printf("here 1\n");
     startIndexers();
+
+	printf("here 2\n");
     startThreadCollector();
     startSearch();
     cleanup();
@@ -142,9 +147,9 @@ void initialize() {
 	 endofindexedfilelist = NULL;
 	 searchfor = NULL;
 	 indexcomplete = 0;
-	 if (pthread_cond_init(searchcomplete, NULL)) {
+	 if (pthread_cond_init(&searchcomplete, NULL)) {
         perror("pthread_cond_init");
-        return NULL;
+        // return NULL;
     }
 }
 
@@ -350,6 +355,7 @@ void* threadCollector(void *threadptr) {
         }
 	}
 	finishedindexing();
+	return NULL; 
 }
 
 
@@ -479,8 +485,8 @@ void cleanup() {
     }
     free(info.bbp->buffer);
     free(info.bbp);
-		if (global_index->searchfor != NULL){
-		free(global_index->searchfor);
+		if (searchfor != NULL){
+		free(searchfor);
 	}
 	struct stringnode* temp = indexedfilelist;
 	struct stringnode* temp2;
@@ -490,7 +496,7 @@ void cleanup() {
 		temp = temp->next;
 		free(temp2);
 	}
-	if (pthread_cond_destroy(searchcomplete)){
+	if (pthread_cond_destroy(&searchcomplete)){
 		perror("pthread_cond_destroy");
 	}
 }
@@ -501,7 +507,7 @@ void addToFileList(char* filename){
 		//mem allocation for string failed
 	}
 	newnode->next = NULL;
-	pthread_mutex_lock(filelistlock);
+	pthread_mutex_lock(&filelistlock);
 	if(indexedfilelist == NULL){
 		indexedfilelist = newnode;
 	}
@@ -514,7 +520,7 @@ void addToFileList(char* filename){
 			free(searchfor);
 			searchfor = NULL;
 			pthread_mutex_unlock(&filelistlock);
-			pthread_cond_signal(searchcomplete);
+			pthread_cond_signal(&searchcomplete);
 		}
 		else{
 			pthread_mutex_unlock(&filelistlock);
@@ -528,7 +534,7 @@ void addToFileList(char* filename){
 void finishedindexing(){
 	pthread_mutex_lock(&filelistlock);
 	indexcomplete = 1;
-	pthread_cond_signal(searchcomplete);
+	pthread_cond_signal(&searchcomplete);
 	pthread_mutex_unlock(&filelistlock);
 }
 	
@@ -549,7 +555,7 @@ int waitUntilFileIsIndexed(char* filename){
 		return -1;
 	}
 	searchfor = strdup(filename);
-	pthread_cond_wait(searchcomplete, &filelistlock);
+	pthread_cond_wait(&searchcomplete, &filelistlock);
 	
 	if (searchfor != NULL){
 		free(searchfor);
