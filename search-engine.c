@@ -36,9 +36,9 @@ Args args;
 
 typedef struct tag_info {
     FILE *file_list;
-	bounded_buffer_t bbp; 
+    bounded_buffer_t bbp; 
     pthread_t scanner_thread;
-	pthread_t collector_thread
+    pthread_t collector_thread;
     pthread_t *indexer_threads;
     int scan_complete;
     int files_indexed;
@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
     initialize();
     startScanner();
     startIndexers();
-	startThreadCollector();
+    startThreadCollector();
     startSearch();
     cleanup();
     return 0;
@@ -304,15 +304,15 @@ void startIndexers() {
 }
 
 void devourSpaces(char** start){
-	char* temp = start*;
-	while(temp* == ' '){
+	char* temp = *start;
+	while(*temp == ' '){
 		++temp;
 	}
 }
 
 void devourWord(char** start){
-	char* temp = start*;
-	while(temp* != ' ' && temp* != '\n' && temp* != '\0'){
+	char* temp = *start;
+	while(*temp != ' ' && *temp != '\n' && *temp != '\0'){
 		++temp;
 	}
 }
@@ -356,34 +356,34 @@ void startSearch() {
 
     while (fgets(line, BUFFER_SIZE, stdin)) {
 		temp = line;
-		devourSpaces(&temp, end);
-		if (temp* != '\n' && temp* != '\0'){
+		devourSpaces(&temp);
+		if (*temp != '\n' && *temp != '\0'){
 			firstword = temp;
 		}
 		devourWord(&temp);
-		if(temp* == ' '){
-			temp* = '\0';
+		if(*temp == ' '){
+			*temp = '\0';
 			++temp;
-			devourSpaces(&temp, end);
-			if (temp* != '\n' && temp* != '\0'){
+			devourSpaces(&temp);
+			if (*temp != '\n' && *temp != '\0'){
 				secondword = temp;
 				devourWord(&temp);
-				if(temp* == ' '){
-					temp* = '\0';
+				if(*temp == ' '){
+					*temp = '\0';
 					++temp;
-					devourSpaces(&temp, end);
-					if (temp* != '\n' && temp* != '\0'){
+					devourSpaces(&temp);
+					if (*temp != '\n' && *temp != '\0'){
 						//too many args, not sure if it should error
 					}
-				)
+				}
 				else{
-					temp* = '\0';
+					*temp = '\0';
 				}
 			}
 			
 		}
 		else{
-			temp* = '\0';
+			*temp = '\0';
 		}
 
 		if (firstword == NULL){
@@ -416,9 +416,9 @@ void startSearch() {
 				index_search_results_t *results = find_in_index(secondword);
 				if (results) {
 					printf("%d results found before filtering by filename...\n", results->num_results);
-					for (int i = 0; i < results->num_refsults; ++i) {
+					for (int i = 0; i < results->num_results; ++i) {
 						index_search_elem_t *result = &results->results[i];
-						if(!strcmp(firstword, result->file_name){
+						if(!strcmp(firstword, result->file_name)){
 							printf("FOUND: %s %d\n", result->file_name, result->line_number);
 						}
 					}

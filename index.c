@@ -244,7 +244,7 @@ struct hashtable {
 	pthread_mutex_t filelistlock;
 	struct stringnode* indexedfilelist;
 	struct stringnode* endofindexedfilelist;
-	char* searchfor
+	char* searchfor;
 	int indexcomplete;
 	pthread_cond_t * searchcomplete;
 };
@@ -342,7 +342,7 @@ create_hashtable(unsigned int minsize,
 	 h->endofindexedfilelist = NULL;
 	 h->searchfor = NULL;
 	 h->indexcomplete = 0;
-	 if (pthread_cond_init(&h->searchcomplete, NULL)) {
+	 if (pthread_cond_init(h->searchcomplete, NULL)) {
         perror("pthread_cond_init");
         return NULL;
     }
@@ -644,6 +644,8 @@ hashtable_remove(struct hashtable *h, void *k)
     return NULL;
 }
 
+struct hashtable * global_index;
+
 /*****************************************************************************/
 /* destroy */
 void
@@ -684,8 +686,8 @@ hashtable_destroy(struct hashtable *h, int free_values)
         }
     }
     free(h->locks);
-	if (global_index->search != NULL){
-		free(global_index->search);
+	if (global_index->searchfor != NULL){
+		free(global_index->searchfor);
 	}
 	struct stringnode* temp = global_index->indexedfilelist;
 	struct stringnode* temp2;
@@ -696,7 +698,7 @@ hashtable_destroy(struct hashtable *h, int free_values)
 		free(temp2);
 	}
 	
-	if (pthread_cond_destroy(&global_index->searchcomplete)){
+	if (pthread_cond_destroy(global_index->searchcomplete)){
 		perror("pthread_cond_destroy");
 	}
     free(h->table);
@@ -924,8 +926,6 @@ static int keys_equal_fn ( void *key1, void *key2 )
   return(!strcmp((char *) key1, (char *) key2));
 }
 
-struct hashtable * global_index;
-
 int init_index()
 {
  global_index = create_hashtable(1024, hash_from_key_fn, keys_equal_fn);
@@ -1060,21 +1060,27 @@ void addToFileList(char* filename){
 		global_index->endofindexedfilelist->next = newnode;
 	}
 	global_index->endofindexedfilelist = newnode;
-	pthread_mutex_unlock(&global_index->filelistlock);
+	if(!strcmp(filename, global_index->searchfor)){
+		pthread_mutex_unlock(&global_index->filelistlock);
+		pthread_cond_signal(global_index->searchcomplete);
+	}
+	else{
+		pthread_mutex_unlock(&global_index->filelistlock);
+	}
 }
 
 void finishedindexing(){
 	pthread_mutex_lock(&global_index->filelistlock);
 	global_index->indexcomplete = 1;
-	pthread_cond_signal(&_c);
-	pthread_mutex_unlock(&global_index->searchcomplete);
+	pthread_cond_signal(global_index->searchcomplete);
+	pthread_mutex_unlock(&global_index->filelistlock);
 }
 	
 int waitUntilFileIsIndexed(char* filename){
 	pthread_mutex_lock(&global_index->filelistlock);
-	temp = global_index->indexedfilelist;
+	struct stringnode* temp = global_index->indexedfilelist;
 	while(temp != NULL){
-		if(!strcmp(filename, temp->string){
+		if(!strcmp(filename, temp->string)){
 			pthread_mutex_unlock(&global_index->filelistlock);
 			//it has already been indexed
 			return 0;
@@ -1086,11 +1092,11 @@ int waitUntilFileIsIndexed(char* filename){
 		return -1;
 	}
 	global_index->searchfor = filename;
-	pthread_cond_wait(&global_index->searchcomplete, &global_index->filelistlock);
+	pthread_cond_wait(global_index->searchcomplete, &global_index->filelistlock);
 	
-	if (global_index->search != NULL){
-		free(global_index->search);
-		global_index->search = NULL;
+	if (global_index->searchfor != NULL){
+		free(global_index->searchfor);
+		global_index->searchfor = NULL;
 		pthread_mutex_unlock(&global_index->filelistlock);
 		return -1;
 	}
