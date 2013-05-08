@@ -233,9 +233,8 @@ char * get_from_buffer() {
 	return file; 
 }
 
+// Read files from list produced by scanner, add words to hash table
 void* indexerWorker(void *data) {
-    // TODO : read files from list produced by scanner, add words to hash table
-	// Not sure about this, but here it goes:
 	int BUFFER_SIZE = 1024;
 	char buffer[BUFFER_SIZE];
 
@@ -265,13 +264,13 @@ void* indexerWorker(void *data) {
     while (!feof(file)) {
         fgets(buffer, MAXPATH, file);
         char *saveptr;
-        char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
+        char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
         while (word != NULL) {
 #ifdef DEBUG
-            printf("[%.8x indexer] checking if '%s' is already in index...\n", pthread_self(), word);
+            printf("[%.8x indexer] '%s' : checking if '%s' is already in index...\n", pthread_self(), filename, word);
 #endif
             insert_into_index(word, filename, line_number);
-            word = strtok_r(NULL, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
+            word = strtok_r(NULL, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
         }
         ++line_number;
     }
@@ -318,7 +317,6 @@ void doBasicSearch(char *word) {
 // Get search terms and check them against hash table
 void startSearch() {
     printf("Starting search...\n");
-
     int BUFFER_SIZE = 1024;
     char word[BUFFER_SIZE];
     memset(word, 0, sizeof(char) * BUFFER_SIZE);
