@@ -301,33 +301,46 @@ void startIndexers() {
 }
 
 // ----------------------------------------------------------------------------
+void doBasicSearch(char *word) {
+    index_search_results_t *results = find_in_index(word);
+
+    if (results) {
+        for (int i = 0; i < results->num_results; ++i) {
+            index_search_elem_t *result = &results->results[i];
+            printf("FOUND: %s %d\n", result->file_name, result->line_number);
+        }
+        printf("%d results found...\n", results->num_results);
+    } else {
+        printf("Word not found\n");
+    }
+}
+
+// Get search terms and check them against hash table
 void startSearch() {
-    // TODO : get search terms and check them against hash table
     printf("Starting search...\n");
 
     int BUFFER_SIZE = 1024;
     char word[BUFFER_SIZE];
     memset(word, 0, sizeof(char) * BUFFER_SIZE);
 
-    while (fgets(word, BUFFER_SIZE, stdin)) {
+    // TODO : first search always returns no results, not sure why
+    // Keep getting search terms until EOF (ctrl-D on unix systems)
+    int c;
+    while (EOF != (c = getc(stdin))) {
+        //  Put non-EOF character back into stdin
+        ungetc(c, stdin);
+
+        // Get the search term
+        fgets(word, BUFFER_SIZE, stdin);
         if (word[strlen(word) - 1] == '\n') {
             word[strlen(word) - 1] = '\0';
         }
-        if (!strcmp(word, "EXIT\0")) {
-            break;
-        }
-
         printf("input: '%s'\n", word); 
-        index_search_results_t *results = find_in_index(word);
-        if (results) {
-            printf("%d results found...\n", results->num_results);
-            for (int i = 0; i < results->num_results; ++i) {
-                index_search_elem_t *result = &results->results[i];
-                printf("FOUND: %s %d\n", result->file_name, result->line_number);
-            }
-        } else {
-            printf("Word not found\n");
-        }
+
+        // TODO : determine whether to do basic or advanced search
+        doBasicSearch(word);
+
+        // Clear the search buffer for next term
         memset(word, 0, sizeof(char) * BUFFER_SIZE);
     }
 }
