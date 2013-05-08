@@ -38,6 +38,7 @@ typedef struct tag_info {
     FILE *file_list;
 	bounded_buffer_t bbp; 
     pthread_t scanner_thread;
+	pthread_t collector_thread
     pthread_t *indexer_threads;
     int scan_complete;
     int files_indexed;
@@ -49,6 +50,7 @@ void parseArgs(int argc, char *argv[]);
 void initialize();
 void startScanner();
 void startIndexers();
+void startThreadCollector();
 void startSearch();
 void cleanup();
 
@@ -62,6 +64,7 @@ int main(int argc, char *argv[]) {
     initialize();
     startScanner();
     startIndexers();
+	startThreadCollector();
     startSearch();
     cleanup();
     return 0;
@@ -300,35 +303,131 @@ void startIndexers() {
 	}
 }
 
+void devourSpaces(char** start){
+	char* temp = start*;
+	while(temp* == ' '){
+		++temp;
+	}
+}
+
+void devourWord(char** start){
+	char* temp = start*;
+	while(temp* != ' ' && temp* != '\n' && temp* != '\0'){
+		++temp;
+	}
+}
+
+void* threadCollector(void *threadptr) {
+	if (info.indexer_threads != NULL) {
+        for (int i = 0; i < args.num_indexer_threads; ++i) {
+            printf("Indexer thread #%d joining...\n", i);
+            pthread_join(info.indexer_threads[i], NULL);
+            printf("Indexer thread #%d completed.\n", i);
+        }
+	}
+	finishedindexing();
+}
+
+
+// ----------------------------------------------------------------------------
+void startThreadCollector() {
+#ifdef DEBUG
+	printf("startThreadCollector()\n");
+#endif
+	if (pthread_create(& info.collector_thread, NULL, threadCollector, NULL)) {
+		fprintf(stderr, "Failed to create collector thread.\n");
+	} else {
+#ifdef DEBUG
+		printf("[%.8x main] created collector thread.\n", pthread_self());
+#endif
+	}
+}
 // ----------------------------------------------------------------------------
 void startSearch() {
     // TODO : get search terms and check them against hash table
     printf("Starting search...\n");
 
     int BUFFER_SIZE = 1024;
-    char word[BUFFER_SIZE];
-    memset(word, 0, sizeof(char) * BUFFER_SIZE);
+    char line[BUFFER_SIZE];
+	char* firstword = NULL;
+	char* secondword = NULL;
+	char* temp;
+    memset(line, 0, sizeof(char) * BUFFER_SIZE);
 
-    while (fgets(word, BUFFER_SIZE, stdin)) {
-        if (word[strlen(word) - 1] == '\n') {
-            word[strlen(word) - 1] = '\0';
-        }
-        if (!strcmp(word, "EXIT\0")) {
-            break;
-        }
+    while (fgets(line, BUFFER_SIZE, stdin)) {
+		temp = line;
+		devourSpaces(&temp, end);
+		if (temp* != '\n' && temp* != '\0'){
+			firstword = temp;
+		}
+		devourWord(&temp);
+		if(temp* == ' '){
+			temp* = '\0';
+			++temp;
+			devourSpaces(&temp, end);
+			if (temp* != '\n' && temp* != '\0'){
+				secondword = temp;
+				devourWord(&temp);
+				if(temp* == ' '){
+					temp* = '\0';
+					++temp;
+					devourSpaces(&temp, end);
+					if (temp* != '\n' && temp* != '\0'){
+						//too many args, not sure if it should error
+					}
+				)
+				else{
+					temp* = '\0';
+				}
+			}
+			
+		}
+		else{
+			temp* = '\0';
+		}
 
-        printf("input: '%s'\n", word); 
-        index_search_results_t *results = find_in_index(word);
-        if (results) {
-            printf("%d results found...\n", results->num_results);
-            for (int i = 0; i < results->num_results; ++i) {
-                index_search_elem_t *result = &results->results[i];
-                printf("FOUND: %s %d\n", result->file_name, result->line_number);
-            }
-        } else {
-            printf("Word not found\n");
-        }
-        memset(word, 0, sizeof(char) * BUFFER_SIZE);
+		if (firstword == NULL){
+			//input did not have any words
+		}
+		else{
+			if (!strcmp(firstword, "EXIT\0")) {
+				break;
+			}
+			
+			if (secondword == NULL){
+				//standard search
+				printf("input: '%s'\n", firstword); 
+				index_search_results_t *results = find_in_index(firstword);
+				if (results) {
+					printf("%d results found...\n", results->num_results);
+					for (int i = 0; i < results->num_results; ++i) {
+						index_search_elem_t *result = &results->results[i];
+						printf("FOUND: %s %d\n", result->file_name, result->line_number);
+					}
+				} else {
+					printf("Word not found\n");
+				}
+			}
+			else{
+				//advanced search
+				waitUntilFileIsIndexed(firstword);
+				
+				printf("input: '%s' '%s'\n", firstword, secondword); 
+				index_search_results_t *results = find_in_index(secondword);
+				if (results) {
+					printf("%d results found before filtering by filename...\n", results->num_results);
+					for (int i = 0; i < results->num_refsults; ++i) {
+						index_search_elem_t *result = &results->results[i];
+						if(!strcmp(firstword, result->file_name){
+							printf("FOUND: %s %d\n", result->file_name, result->line_number);
+						}
+					}
+				} else {
+					printf("Word not found\n");
+				}
+			}
+		}
+        memset(line, 0, sizeof(char) * BUFFER_SIZE);
     }
 }
 
@@ -341,11 +440,11 @@ void cleanup() {
 
     // Join any remaining indexer threads and free the array of threads
     if (info.indexer_threads != NULL) {
-        for (int i = 0; i < args.num_indexer_threads; ++i) {
-            printf("Indexer thread #%d joining...\n", i);
-            pthread_join(info.indexer_threads[i], NULL);
-            printf("Indexer thread #%d completed.\n", i);
-        }
+        //for (int i = 0; i < args.num_indexer_threads; ++i) {
+        //    printf("Indexer thread #%d joining...\n", i);
+        //    pthread_join(info.indexer_threads[i], NULL);
+        //    printf("Indexer thread #%d completed.\n", i);
+        //}
         free(info.indexer_threads);
     }
     printf("\n\nFiles indexed: %d\n", info.files_indexed);

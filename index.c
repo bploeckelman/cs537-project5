@@ -225,6 +225,11 @@ struct entry
     struct entry *next;
 };
 
+struct stringnode{
+	char* string;
+	struct stringnode* next;
+};
+
 struct hashtable {
     unsigned int tablelength;
     struct entry **table;
@@ -236,6 +241,12 @@ struct hashtable {
     pthread_rwlock_t globallock;
     pthread_mutex_t entrycountlock;
     pthread_rwlock_t *locks;
+	pthread_mutex_t filelistlock;
+	struct stringnode* indexedfilelist;
+	struct stringnode* endofindexedfilelist;
+	char* searchfor
+	int indexcomplete;
+	pthread_cond_t * searchcomplete;
 };
 
 /*****************************************************************************/
@@ -326,8 +337,16 @@ create_hashtable(unsigned int minsize,
             return NULL;
         }
     }
-
-    return h;
+	
+	 h->indexedfilelist = NULL;
+	 h->endofindexedfilelist = NULL;
+	 h->searchfor = NULL;
+	 h->indexcomplete = 0;
+	 if (pthread_cond_init(&h->searchcomplete, NULL)) {
+        perror("pthread_cond_init");
+        return NULL;
+    }
+	return h;
 }
 
 /*****************************************************************************/
@@ -665,7 +684,21 @@ hashtable_destroy(struct hashtable *h, int free_values)
         }
     }
     free(h->locks);
-
+	if (global_index->search != NULL){
+		free(global_index->search);
+	}
+	struct stringnode* temp = global_index->indexedfilelist;
+	struct stringnode* temp2;
+	while (temp != NULL){
+		free(temp->string);
+		temp2 = temp;
+		temp = temp->next;
+		free(temp2);
+	}
+	
+	if (pthread_cond_destroy(&global_index->searchcomplete)){
+		perror("pthread_cond_destroy");
+	}
     free(h->table);
     free(h);
 }
@@ -1011,4 +1044,56 @@ index_search_results_t * find_in_index(char * word)
     }   
   }
   return(results);
+}
+
+void addToFileList(char* filename){
+	struct stringnode* newnode = (struct stringnode*)malloc(sizeof(struct stringnode ));
+	if ((newnode->string = strdup(filename)) == NULL){
+		//mem allocation for string failed
+	}
+	newnode->next = NULL;
+	pthread_mutex_lock(&global_index->filelistlock);
+	if(global_index->indexedfilelist == NULL){
+		global_index->indexedfilelist = newnode;	
+	}
+	else{
+		global_index->endofindexedfilelist->next = newnode;
+	}
+	global_index->endofindexedfilelist = newnode;
+	pthread_mutex_unlock(&global_index->filelistlock);
+}
+
+void finishedindexing(){
+	pthread_mutex_lock(&global_index->filelistlock);
+	global_index->indexcomplete = 1;
+	pthread_cond_signal(&_c);
+	pthread_mutex_unlock(&global_index->searchcomplete);
+}
+	
+int waitUntilFileIsIndexed(char* filename){
+	pthread_mutex_lock(&global_index->filelistlock);
+	temp = global_index->indexedfilelist;
+	while(temp != NULL){
+		if(!strcmp(filename, temp->string){
+			pthread_mutex_unlock(&global_index->filelistlock);
+			//it has already been indexed
+			return 0;
+		}
+	}
+
+	if(global_index->indexcomplete){
+		pthread_mutex_unlock(&global_index->filelistlock);
+		return -1;
+	}
+	global_index->searchfor = filename;
+	pthread_cond_wait(&global_index->searchcomplete, &global_index->filelistlock);
+	
+	if (global_index->search != NULL){
+		free(global_index->search);
+		global_index->search = NULL;
+		pthread_mutex_unlock(&global_index->filelistlock);
+		return -1;
+	}
+	pthread_mutex_unlock(&global_index->filelistlock);
+	return 0;
 }
