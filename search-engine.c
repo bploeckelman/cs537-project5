@@ -256,6 +256,7 @@ void* indexerWorker(void *data) {
 #endif
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
+        //printf("[%.8x indexer] buffer empty, scan status = %d\n", pthread_self(), info.scan_complete);
         if (info.scan_complete && info.bbp->count == 0) {
             // no more files to scan, exit indexer thread
             pthread_mutex_unlock(&mutex_cond.bb_mutex);
@@ -390,8 +391,14 @@ void cleanup() {
 
     // Join any remaining indexer threads and free the array of threads
     if (info.indexer_threads != NULL) {
-        /*
+        //*
         for (int i = 0; i < args.num_indexer_threads; ++i) {
+            // NOTE: maybe this will work better?
+            // since the indexers don't need to keep indexing
+            // if the user is done searching
+            printf("Indexer thread #%d cancelling...\n", i);
+            pthread_cancel(info.indexer_threads[i]);
+            /*
             printf("Indexer thread #%d joining...\n", i);
             if (pthread_join(info.indexer_threads[i], NULL)) {
                 char buf[256];
@@ -400,8 +407,10 @@ void cleanup() {
                 continue;
             }
             printf("Indexer thread #%d completed.\n", i);
+            */
+            printf("Indexer thread #%d cancelled.\n", i);
         }
-        */
+        //*/
         free(info.indexer_threads);
     }
     printf("\n\nFiles indexed: %d\n", info.files_indexed);
