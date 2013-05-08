@@ -45,6 +45,11 @@ typedef struct tag_info {
 } Info;
 Info info;
 
+struct stringnode{
+	char* string;
+	struct stringnode* next;
+};
+
 
 void parseArgs(int argc, char *argv[]);
 void initialize();
@@ -54,6 +59,16 @@ void startThreadCollector();
 void startSearch();
 void cleanup();
 
+void addToFileList(char* filename);
+void finishedindexing();
+int waitUntilFileIsIndexed(char* filename);
+
+pthread_mutex_t filelistlock;
+struct stringnode* indexedfilelist;
+struct stringnode* endofindexedfilelist;
+char* searchfor;
+int indexcomplete;
+pthread_cond_t * searchcomplete;
 
 // ----------------------------------------------------------------------------
 // Entry point ----------------------------------------------------------------
@@ -122,6 +137,15 @@ void initialize() {
 
     initBoundedBuffer();
 	initMutexStruct(); 
+		
+	 indexedfilelist = NULL;
+	 endofindexedfilelist = NULL;
+	 searchfor = NULL;
+	 indexcomplete = 0;
+	 if (pthread_cond_init(searchcomplete, NULL)) {
+        perror("pthread_cond_init");
+        return NULL;
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -455,5 +479,85 @@ void cleanup() {
     }
     free(info.bbp->buffer);
     free(info.bbp);
+		if (global_index->searchfor != NULL){
+		free(global_index->searchfor);
+	}
+	struct stringnode* temp = indexedfilelist;
+	struct stringnode* temp2;
+	while (temp != NULL){
+		free(temp->string);
+		temp2 = temp;
+		temp = temp->next;
+		free(temp2);
+	}
+	if (pthread_cond_destroy(searchcomplete)){
+		perror("pthread_cond_destroy");
+	}
+}
+
+void addToFileList(char* filename){
+	struct stringnode* newnode = (struct stringnode*)malloc(sizeof(struct stringnode ));
+	if ((newnode->string = strdup(filename)) == NULL){
+		//mem allocation for string failed
+	}
+	newnode->next = NULL;
+	pthread_mutex_lock(filelistlock);
+	if(indexedfilelist == NULL){
+		indexedfilelist = newnode;
+	}
+	else{
+		endofindexedfilelist->next = newnode;
+	}
+	endofindexedfilelist = newnode;
+	if(searchfor != NULL){
+		if(!strcmp(filename, searchfor)){
+			free(searchfor);
+			searchfor = NULL;
+			pthread_mutex_unlock(&filelistlock);
+			pthread_cond_signal(searchcomplete);
+		}
+		else{
+			pthread_mutex_unlock(&filelistlock);
+		}
+	}
+	else{
+		pthread_mutex_unlock(&filelistlock);
+	}
+}
+
+void finishedindexing(){
+	pthread_mutex_lock(&filelistlock);
+	indexcomplete = 1;
+	pthread_cond_signal(searchcomplete);
+	pthread_mutex_unlock(&filelistlock);
+}
+	
+int waitUntilFileIsIndexed(char* filename){
+	pthread_mutex_lock(&filelistlock);
+	struct stringnode* temp = indexedfilelist;
+	while(temp != NULL){
+		if(!strcmp(filename, temp->string)){
+			pthread_mutex_unlock(&filelistlock);
+			//it has already been indexed
+			return 0;
+		}
+		temp = temp->next;
+	}
+
+	if(indexcomplete){
+		pthread_mutex_unlock(&filelistlock);
+		return -1;
+	}
+	searchfor = strdup(filename);
+	pthread_cond_wait(searchcomplete, &filelistlock);
+	
+	if (searchfor != NULL){
+		free(searchfor);
+		searchfor = NULL;
+		pthread_mutex_unlock(&filelistlock);
+		return -1;
+	}
+	pthread_mutex_unlock(&filelistlock);
+	return 0;
 }
 
