@@ -1,4 +1,4 @@
 #!/bin/bash
 
-find . -type f > files-list.txt
+find ./testfiles -type f > files-list.txt
 
