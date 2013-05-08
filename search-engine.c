@@ -355,6 +355,7 @@ void* threadCollector(void *threadptr) {
         }
 	}
 	finishedindexing();
+	printf("indexcomplete = %d\n", indexcomplete);
 	return NULL; 
 }
 
@@ -432,10 +433,10 @@ void startSearch() {
 			printf("temp2 = '%s'\n", temp2);
 
             if (temp2 == NULL) {
-               // doBasicSearch(temp1);
+                doBasicSearch(temp1);
             } else {
                 if(strtok(NULL," \t\n") == NULL) {
-                   //  doAdvancedSearch(temp1, temp2);
+                    doAdvancedSearch(temp1, temp2);
                 } else {
                     printf("***ERROR: Bad input\n");
                 }
@@ -486,7 +487,7 @@ void cleanup() {
 	}
 	if (pthread_cond_destroy(&searchcomplete)){
 		perror("pthread_cond_destroy");
-	}
+	}	
 }
 
 void addToFileList(char* filename){
@@ -507,8 +508,8 @@ void addToFileList(char* filename){
 		if(!strcmp(filename, searchfor)){
 			free(searchfor);
 			searchfor = NULL;
-			pthread_mutex_unlock(&filelistlock);
 			pthread_cond_signal(&searchcomplete);
+			pthread_mutex_unlock(&filelistlock);
 		}
 		else{
 			pthread_mutex_unlock(&filelistlock);
