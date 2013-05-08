@@ -281,7 +281,7 @@ void* indexerWorker(void *data) {
     printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
     info.files_indexed++;
     fclose(file);
-
+	addToFileList(filename);
     goto GetNext;
     return NULL;
 }
@@ -437,7 +437,8 @@ void cleanup() {
     // Join the scanner thread
     pthread_join(info.scanner_thread, NULL);
     printf("Scanner thread completed.\n");
-
+	pthread_join(info.collector_thread, NULL);
+    printf("Collector thread completed.\n");
     // Join any remaining indexer threads and free the array of threads
     if (info.indexer_threads != NULL) {
         //for (int i = 0; i < args.num_indexer_threads; ++i) {
