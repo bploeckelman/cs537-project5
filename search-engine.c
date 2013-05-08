@@ -243,8 +243,10 @@ void* indexerWorker(void *data) {
     printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
-        if (info.scan_complete) {
+        if (info.scan_complete && info.bbp->count == 0) {
             // no more files to scan, exit indexer thread
+            pthread_mutex_unlock(&mutex_cond.bb_mutex);
+            printf("[%.8x indexer] buffer empty, scan complete, exiting thread...\n", pthread_self());
             return NULL;
         }
         printf("[%.8x indexer] waiting on buffer full condition...\n", pthread_self());
@@ -311,6 +313,9 @@ void startSearch() {
         if (word[strlen(word) - 1] == '\n') {
             word[strlen(word) - 1] = '\0';
         }
+        if (!strcmp(word, "EXIT\0")) {
+            break;
+        }
 
         printf("input: '%s'\n", word); 
         index_search_results_t *results = find_in_index(word);
@@ -329,13 +334,17 @@ void startSearch() {
 
 // ----------------------------------------------------------------------------
 void cleanup() {
+    printf("\n\n---------------------CLEANUP---------------------------\n\n");
     // Join the scanner thread
     pthread_join(info.scanner_thread, NULL);
+    printf("Scanner thread completed.\n");
 
     // Join any remaining indexer threads and free the array of threads
     if (info.indexer_threads != NULL) {
         for (int i = 0; i < args.num_indexer_threads; ++i) {
+            printf("Indexer thread #%d joining...\n", i);
             pthread_join(info.indexer_threads[i], NULL);
+            printf("Indexer thread #%d completed.\n", i);
         }
         free(info.indexer_threads);
     }
