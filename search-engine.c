@@ -373,90 +373,78 @@ void startThreadCollector() {
 	}
 }
 // ----------------------------------------------------------------------------
+
+void doBasicSearch(char * word) {
+	//standard search
+	printf("input: '%s'\n", word); 
+	index_search_results_t *results = find_in_index(word);
+	if (results) {
+		printf("%d results found...\n", results->num_results);
+		for (int i = 0; i < results->num_results; ++i) {
+			index_search_elem_t *result = &results->results[i];
+			printf("FOUND: %s %d\n", result->file_name, result->line_number);
+		}
+	} else {
+		printf("Word not found\n");
+	}
+}
+
+void doAdvancedSearch(char * filename, char * word) {
+    //advanced search
+    waitUntilFileIsIndexed(filename);
+
+    printf("input: '%s' '%s'\n", filename, word); 
+    index_search_results_t *results = find_in_index(word);
+    if (results) {
+        printf("%d results found before filtering by filename...\n", results->num_results);
+        for (int i = 0; i < results->num_results; ++i) {
+            index_search_elem_t *result = &results->results[i];
+            if(!strcmp(filename, result->file_name)){
+                printf("FOUND: %s %d\n", result->file_name, result->line_number);
+            }
+        }
+    } else {
+        printf("Word not found\n");
+    }	
+}
+
 void startSearch() {
     // TODO : get search terms and check them against hash table
     printf("Starting search...\n");
 
     int BUFFER_SIZE = 1024;
     char line[BUFFER_SIZE];
-	char* firstword = NULL;
-	char* secondword = NULL;
-	char* temp;
+	char* temp1 = NULL;
+	char* temp2 = NULL;
+	char * saveptr; 
+
     memset(line, 0, sizeof(char) * BUFFER_SIZE);
 
     while (fgets(line, BUFFER_SIZE, stdin)) {
-		temp = line;
-		devourSpaces(&temp);
-		if (*temp != '\n' && *temp != '\0'){
-			firstword = temp;
-		}
-		devourWord(&temp);
-		if(*temp == ' '){
-			*temp = '\0';
-			++temp;
-			devourSpaces(&temp);
-			if (*temp != '\n' && *temp != '\0'){
-				secondword = temp;
-				devourWord(&temp);
-				if(*temp == ' '){
-					*temp = '\0';
-					++temp;
-					devourSpaces(&temp);
-					if (*temp != '\n' && *temp != '\0'){
-						//too many args, not sure if it should error
-					}
-				}
-				else{
-					*temp = '\0';
-				}
-			}
-			
-		}
-		else{
-			*temp = '\0';
+		if(line[strlen(line) - 1] == '\n')
+			line[strlen(line) - 1] = 0; 
+
+		temp1 = strtok(line, " \t\n");
+		printf("temp1 = '%s'\n", temp1);
+
+		if (temp1 !=NULL) {
+			temp2 = strtok(NULL, " \t\n");	
+			printf("temp2 = '%s'\n", temp2);
+
+            if (temp2 == NULL) {
+               // doBasicSearch(temp1);
+            } else {
+                if(strtok(NULL," \t\n") == NULL) {
+                   //  doAdvancedSearch(temp1, temp2);
+                } else {
+                    printf("***ERROR: Bad input\n");
+                }
+
+            }
 		}
 
-		if (firstword == NULL){
-			//input did not have any words
-		}
-		else{
-			if (!strcmp(firstword, "EXIT\0")) {
-				break;
-			}
-			
-			if (secondword == NULL){
-				//standard search
-				printf("input: '%s'\n", firstword); 
-				index_search_results_t *results = find_in_index(firstword);
-				if (results) {
-					printf("%d results found...\n", results->num_results);
-					for (int i = 0; i < results->num_results; ++i) {
-						index_search_elem_t *result = &results->results[i];
-						printf("FOUND: %s %d\n", result->file_name, result->line_number);
-					}
-				} else {
-					printf("Word not found\n");
-				}
-			}
-			else{
-				//advanced search
-				waitUntilFileIsIndexed(firstword);
-				
-				printf("input: '%s' '%s'\n", firstword, secondword); 
-				index_search_results_t *results = find_in_index(secondword);
-				if (results) {
-					printf("%d results found before filtering by filename...\n", results->num_results);
-					for (int i = 0; i < results->num_results; ++i) {
-						index_search_elem_t *result = &results->results[i];
-						if(!strcmp(firstword, result->file_name)){
-							printf("FOUND: %s %d\n", result->file_name, result->line_number);
-						}
-					}
-				} else {
-					printf("Word not found\n");
-				}
-			}
-		}
+		
+	
         memset(line, 0, sizeof(char) * BUFFER_SIZE);
     }
 }
