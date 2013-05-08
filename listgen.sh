@@ -1,4 +1,4 @@
 #!/bin/bash
 
-find ./testfiles -type f > files-list.txt
+find ./grade_files -type f > files-list.txt
 
