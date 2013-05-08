@@ -8,7 +8,8 @@
 
 #include "index.h"
 
-#define DEBUG
+// #define DEBUG
+// #define INDEXER
 #define BOUNDED_BUFFER_SIZE 32
 
 typedef struct bounded_buffer_s {
@@ -259,7 +260,9 @@ void startScanner() {
 // ----------------------------------------------------------------------------
 char * get_from_buffer() {
 	char * file = info.bbp->buffer[info.bbp->use];
+#ifndef INDEXER
     printf("[%.8x indexer] get_from_buffer[%d] '%s'\n", pthread_self(), info.bbp->use, file);
+#endif 
 	info.bbp->use = (info.bbp->use + 1) % info.bbp->size; 
 	info.bbp->count--;
 	return file; 
@@ -272,13 +275,18 @@ void* indexerWorker(void *data) {
 	char buffer[BUFFER_SIZE];
 
     GetNext:
+
+#ifndef INDEXER 
     printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
+#endif
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
         if (info.scan_complete && info.bbp->count == 0) {
             // no more files to scan, exit indexer thread
             pthread_mutex_unlock(&mutex_cond.bb_mutex);
+#ifndef INDEXER 
             printf("[%.8x indexer] buffer empty, scan complete, exiting thread...\n", pthread_self());
+#endif 
             return NULL;
         }
         printf("[%.8x indexer] waiting on buffer full condition...\n", pthread_self());
@@ -286,12 +294,19 @@ void* indexerWorker(void *data) {
 	}
 
 	char * filename = get_from_buffer();
+#ifndef INDEXER 
     printf("[%.8x indexer] signalling empty condition...\n", pthread_self(), filename);
+#endif 
 	pthread_cond_signal(&mutex_cond.empty);
+
+#ifndef INDEXER 
     printf("[%.8x indexer] unlocking buffer mutex...\n", pthread_self());
+#endif 
 	pthread_mutex_unlock(&mutex_cond.bb_mutex);
 
+#ifdef INDEXER
     printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
+#endif 
     FILE *file = fopen(filename, "r");
     int line_number = 1;
     while (!feof(file)) {
@@ -299,7 +314,7 @@ void* indexerWorker(void *data) {
         char *saveptr;
         char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
-#ifdef DEBUG
+#ifdef INDEXER 
             printf("[%.8x indexer] checking if '%s' is already in index...\n", pthread_self(), word);
 #endif
             insert_into_index(word, filename, line_number);
@@ -307,7 +322,10 @@ void* indexerWorker(void *data) {
         }
         ++line_number;
     }
+#ifndef INDEXER 
     printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
+#endif 
+
     info.files_indexed++;
     fclose(file);
 	addToFileList(filename);
@@ -417,7 +435,7 @@ void startSearch() {
     char line[BUFFER_SIZE];
 	char* temp1 = NULL;
 	char* temp2 = NULL;
-	char * saveptr; 
+	// char * saveptr; 
 
     memset(line, 0, sizeof(char) * BUFFER_SIZE);
 

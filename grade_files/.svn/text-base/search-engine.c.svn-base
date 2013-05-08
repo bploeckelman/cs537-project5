@@ -1,0 +1,315 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <errno.h>
+#include <string.h>
+#include "index.h"
+
+#define BUFFERSIZE 10
+#define NUM_OF_CHAR_PER_LINE 1000
+// MAXPATH is defined in index.h
+#define MAX_WORD_LENGTH 128  // assume 128 charcaters for searched word
+#define MAX_SEARCH_ENGIN_INPUT MAXPATH + MAX_WORD_LENGTH
+
+void * scanner(void*);
+void * indexer();
+void put_Filename_To_Bounded_Buffer(FILE*);
+char * get_Filename_From_Bounded_Buffer();
+void tokenize_and_index(char*);
+void * searcher();
+void clean_up();
+
+char * fopen_err_msg = "fopen error.\n";
+char * malloc_err_msg = "malloc error.\n";
+char * pthread_create_err_msg = "pthread_create error.\n";
+char * user_input_err_msg = "Invalid input.\n Usage: < word > / < path > < word >\n";
+
+char * bounded_file_buffer[BUFFERSIZE];
+pthread_cond_t empty = PTHREAD_COND_INITIALIZER;
+pthread_cond_t fill = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock_for_hashtable = PTHREAD_MUTEX_INITIALIZER;
+int global_count = 0;
+int global_isEOF = 0;
+
+
+int main(int argc, char* argv[]){
+
+  printf("-----------------------------------------------------------------\n");
+  
+  int num_of_indexer_threads;
+  char * name_of_file_list;
+  
+  num_of_indexer_threads = atoi(argv[1]);
+  name_of_file_list = argv[2];
+  
+  // initialize hashtable
+  init_index();
+  
+  pthread_t scanner_thread;
+  int ret_scanner_thread_create;
+  ret_scanner_thread_create = pthread_create(&scanner_thread, NULL, scanner, (void*)name_of_file_list); 
+  if(ret_scanner_thread_create != 0){
+    perror(pthread_create_err_msg);
+    exit(1);
+  }
+  
+  pthread_t indexer_threads[num_of_indexer_threads];
+  int i; 
+  for(i = 0; i < num_of_indexer_threads; i++){
+    int ret_indexer_thread_create;
+    ret_indexer_thread_create = pthread_create(&indexer_threads[i], NULL, indexer, NULL); 
+    if(ret_indexer_thread_create != 0){
+      perror(pthread_create_err_msg);
+      exit(1);
+    }
+  }
+  
+  pthread_join(scanner_thread, NULL);
+  int j; 
+  for(j = 0; j < num_of_indexer_threads; j++){
+    pthread_join(indexer_threads[j], NULL);
+  }
+  
+  pthread_t seacher_thread;
+  int ret_seacher_thread_create;
+  ret_seacher_thread_create = pthread_create(&seacher_thread, NULL, searcher, NULL); 
+  if(ret_seacher_thread_create != 0){
+    perror(pthread_create_err_msg);
+    exit(1);
+  }
+  
+  pthread_join(seacher_thread, NULL);
+  
+  clean_up();
+  
+  printf("-----------------------------------------------------------------\n");
+  
+  return 0;
+} // end main
+
+void clean_up(){
+  int i;
+  for(i = 0; i < sizeof(bounded_file_buffer); i++){
+    if(bounded_file_buffer[i] != NULL)
+      free(bounded_file_buffer[i]);
+  }
+}
+
+/* searcher-engin thread */
+void * searcher(){
+  
+  char * user_input = (char *) malloc(MAX_SEARCH_ENGIN_INPUT + 2);
+  
+  while(1){
+    
+    /* read user input */
+    int idx = 0;
+    printf("SEARCH: ");
+    fflush(stdout);
+    
+    char c = getc(stdin);
+    if(c == EOF){
+      printf("\n");
+      fflush(stdout);
+      break;
+    }
+    
+    while(c != '\n'){
+      if(c != EOF){
+        user_input[idx] = c;
+        idx++;
+      }
+      c = getc(stdin);
+    }
+    
+    user_input[idx] = '\0';
+  
+    /* grab the word (for basis search) or file name & word (for advanced search) 
+       from user input. If command line input is more than 2 tokens, only takes the 
+       first two */
+    char * tokens[2];
+    int loop = 2;
+    int i;
+    char * saveptr;
+    for(i = 0; i < loop; i++){
+      if(i == 0){
+        tokens[0] = strtok_r(user_input, " \t", &saveptr);
+        if(tokens[0] == NULL){
+          write(2, user_input_err_msg, strlen(user_input_err_msg));
+          exit(1);
+        }
+      }
+      else
+        tokens[i] = strtok_r(NULL, " \t", &saveptr);
+    }
+    
+    /* searching the word in hash table */
+    /* basic search when only one token in command line input */
+    if(tokens[1] == NULL){
+      char * word = tokens[0];
+      index_search_results_t * ret;
+      ret = find_in_index(word);
+      if (ret) {
+        int i;
+        for (i = 0; i < ret->num_results; i++) {
+          printf("FOUND: %s %d\n", ret->results[i].file_name, ret->results[i].line_number);
+        }
+        free(ret);
+      }
+      else{
+        printf("Word not found.\n");
+      }
+      
+    }
+    /* advanced search when if second token is available */
+    else{
+      char * file_name = tokens[0];
+      char * word = tokens[1];
+      index_search_results_t * ret;
+      ret = find_in_index(word);
+      if (ret) {
+        int i;
+        int isFound = 0;
+        for (i = 0; i < ret->num_results; i++) {
+          if(strcmp(file_name,ret->results[i].file_name) == 0){
+            printf("FOUND: %s %d\n",ret->results[i].file_name,ret->results[i].line_number);
+            isFound = 1;
+          }
+        }
+        
+        if(!isFound)
+          printf("Word not found.\n");
+        
+        free(ret);
+      }
+      else{
+        printf("Word not found.\n");
+      }
+      
+    }
+  } // end while
+  
+  return NULL;
+} // end searcher
+
+/* scanner thread */
+void * scanner(void* name_of_file_list){
+  
+  FILE *fp = fopen((char*)name_of_file_list, "r");
+  if(fp != NULL){
+    
+    while(!global_isEOF){
+      pthread_mutex_lock(&mutex);
+      while(global_count == BUFFERSIZE)
+        pthread_cond_wait(&empty, &mutex);
+      
+      put_Filename_To_Bounded_Buffer(fp);   // value of global_isEOF could be changed after this function call 
+      if(!global_isEOF)
+        pthread_cond_signal(&fill);
+      else{
+        pthread_cond_broadcast(&fill);
+      }
+      pthread_mutex_unlock(&mutex);
+    }
+  }
+  else{
+    perror(fopen_err_msg);
+    exit(1);
+  }
+  
+  return NULL;
+} // end scanner
+
+void put_Filename_To_Bounded_Buffer(FILE * fp){
+  
+  if(global_count >= BUFFERSIZE)
+    global_count = global_count % BUFFERSIZE;
+  
+  char file_name[MAXPATH];
+  if(fgets(file_name, sizeof file_name, fp ) != NULL){
+   
+    // remove the '\n' by replacing it with '\0'
+    file_name[strlen(file_name)-1] = '\0';
+    
+    bounded_file_buffer[global_count] = (char*)malloc(strlen(file_name)+1);
+    if(bounded_file_buffer[global_count] == NULL){
+      perror(malloc_err_msg);
+      exit(1);
+    }
+    
+    strncpy(bounded_file_buffer[global_count], file_name, strlen(file_name)+1);
+    global_count++;
+  }
+  else{
+    global_isEOF = 1;
+    fclose(fp);
+  }
+  
+} // end put_Filename_To_Bounded_Buffer
+
+char * get_Filename_From_Bounded_Buffer(){
+  char * p_filename = (char *)malloc(strlen(bounded_file_buffer[global_count-1])+1);
+  strncpy(p_filename, bounded_file_buffer[global_count-1], strlen(bounded_file_buffer[global_count-1])+1);
+  global_count--;
+  return p_filename; 
+}
+
+/* indexer thread */
+void * indexer(){
+  while(!global_isEOF || global_count != 0){
+    pthread_mutex_lock(&mutex);
+    while(global_count == 0){
+      if(!global_isEOF)
+        pthread_cond_wait(&fill, &mutex);
+      else{
+        pthread_mutex_unlock(&mutex);
+        return NULL;
+      }
+    }
+      
+    char * file_name = get_Filename_From_Bounded_Buffer();
+    pthread_cond_signal(&empty);
+    pthread_mutex_unlock(&mutex);
+    
+    tokenize_and_index(file_name);
+    free(file_name);
+  }
+  
+  return NULL;
+} // end indexer
+
+/* this function opens and reads given file line by line. 
+ * it tokennize each line it reads, ans stores the token in to hash table
+ * the lock is just a single global lock 
+ */
+void tokenize_and_index(char * file_name){
+
+  FILE * fp = fopen(file_name, "r");
+  if(fp != NULL){
+    // 2 is for plus '\n' and '\0'
+    char buffer[MAX_WORD_LENGTH + 2]; 
+    int buffer_len = sizeof buffer;
+    int line_number = 1;
+  
+    while (fgets(buffer, buffer_len, fp) != NULL) {
+      char * word;
+      char * saveptr;
+      word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
+      while (word != NULL) {
+        pthread_mutex_lock(&lock_for_hashtable);
+        insert_into_index(word, file_name, line_number);
+        pthread_mutex_unlock(&lock_for_hashtable);
+        word = strtok_r(NULL, " \n\t-_!@#$%^&*()_+=,./<>?",&saveptr);
+      }
+      line_number = line_number+1;
+    }
+    fclose(fp);
+  }
+  else{
+    perror(fopen_err_msg);
+    exit(1);
+  }
+} // end tokenize_and_index
+

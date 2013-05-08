@@ -1,0 +1,4 @@
+search-engine.out: search-engine.c index.c
+	gcc search-engine.c index.c -o search-engine.out -Wall -pthread -lm
+clean:
+	rm -f search-engine.out

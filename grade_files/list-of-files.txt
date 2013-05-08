@@ -1,0 +1,15 @@
+./c
+./a-dir/c
+./a-dir/a
+./a-dir/b
+./a
+./c-dir/c
+./c-dir/a
+./c-dir/b
+./b-dir/c
+./b-dir/a
+./b-dir/b
+./b
+./a-dir/helmsley.pdf
+./a-dir/catfish.pdf
+./large/haystack.txt
