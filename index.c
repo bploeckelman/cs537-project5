@@ -1054,15 +1054,22 @@ void addToFileList(char* filename){
 	newnode->next = NULL;
 	pthread_mutex_lock(&global_index->filelistlock);
 	if(global_index->indexedfilelist == NULL){
-		global_index->indexedfilelist = newnode;	
+		global_index->indexedfilelist = newnode;
 	}
 	else{
 		global_index->endofindexedfilelist->next = newnode;
 	}
 	global_index->endofindexedfilelist = newnode;
-	if(!strcmp(filename, global_index->searchfor)){
-		pthread_mutex_unlock(&global_index->filelistlock);
-		pthread_cond_signal(global_index->searchcomplete);
+	if(global_index->searchfor != NULL){
+		if(!strcmp(filename, global_index->searchfor)){
+			free(global_index->searchfor);
+			global_index->searchfor = NULL;
+			pthread_mutex_unlock(&global_index->filelistlock);
+			pthread_cond_signal(global_index->searchcomplete);
+		}
+		else{
+			pthread_mutex_unlock(&global_index->filelistlock);
+		}
 	}
 	else{
 		pthread_mutex_unlock(&global_index->filelistlock);
@@ -1085,13 +1092,14 @@ int waitUntilFileIsIndexed(char* filename){
 			//it has already been indexed
 			return 0;
 		}
+		temp = temp->next;
 	}
 
 	if(global_index->indexcomplete){
 		pthread_mutex_unlock(&global_index->filelistlock);
 		return -1;
 	}
-	global_index->searchfor = filename;
+	global_index->searchfor = strdup(filename);
 	pthread_cond_wait(global_index->searchcomplete, &global_index->filelistlock);
 	
 	if (global_index->searchfor != NULL){
