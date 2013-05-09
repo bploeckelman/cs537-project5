@@ -18,46 +18,41 @@
 *******************************************************************************
 
 
-
-# DONE (RUBRIC)
-x=done  o=not done
-1. Basic search 
-x	word exists in text file
-x	word exists in pdf
-x	word not found at all
-
-2. Advanced Search
-x	word exists in simple file specified
-x	word does not exist in file specified
-x	file specified does not exist
-x	waits for indexing to finish large file before returning
-	
-	
-
-
-PART 2
-1. 	Implements locking mechanism
-	x	single mutex for whole table
-	x/2	more sophisticated read/write lock
- 	x/4	fine-grain (e.g. bucket-level) lockign
-
-2. 	x - bounded buffer is implemented/used correctly
-3.	x	Waits for threads to exit before terminating program
-
-4. 	o - Code is neat, documented, and easy to understand
-
-
-Issues to fix:
-1. Advanced search - not finding words in file grade_files/c. IS finding it
-for files a and b. 
-2. Appears that the first file in the file list is not getting indexed. 
-3. In hashtable_insert, we have to use these fine-grained locks but grab as write locks (uncomment the stuff that's there)
-4. A little more commenting
-5. Write up a summary of how we do the fine-grained locks in the README.txt
- 
-
 Known Issues:
-
+	No known issues that we can detect. 
 
 Summary:
- Our code is perfect. We are awesome. 
+
+The following are locks we added to the hashtable:
+
+We added a globallock which is a read-write lock for around the hashtable. It treats
+resize as our write access and adding entries and searching as read accesses.
+
+We have an array called locks containing read-write locks for around each
+linked-list in the hashtable. They treat adding to the list as a write access
+and searching as read access of the list.
+
+We also have a mutex lock around the entrycount for the hashtable. The
+entrycount gets accessed by many functions in various places.
+
+The following are locks added to search-engine.c:
+We had a mutex for the bounded buffer, so that the scanner and indexer threads
+could access the bounded buffer in parallel. We also had two condition
+variables empty and full that signaled the scanner and indexer threads when it
+was ok to produce/consume. 
+
+We also had a mutex called filelistlock that covered our list of indexed
+files (we used this list for advanced search). 
+
+Something to note is that we used a scanner, indexer threads, and the main
+thread handles searching, however we also create a thread named 
+collect_thread that joins indexer threads in the background and sets the
+variable indexcomplete to 1 when all the indexer threads have completed.
+ 
+
+
+
+
+
+
+	

@@ -42,7 +42,6 @@ typedef struct tag_info {
     pthread_t scanner_thread;
     pthread_t collector_thread;
     pthread_t *indexer_threads;
-    pthread_mutex_t scanner_mutex;
     int scan_complete;
     int files_indexed;
 } Info;
@@ -112,11 +111,6 @@ void initMutexStruct() {
         exit(1);
     }
 
-    // Initialize scanner mutex
-    if (pthread_mutex_init(&info.scanner_mutex, NULL)) {
-        fprintf(stderr, "Failed to initialize scanner mutex.\n");
-        exit(1);
-    }
 }
 
 //-----------------------------------------------------------------------------
@@ -268,10 +262,8 @@ void* scannerWorker(void *data) {
 	free(line);
     fclose(info.file_list);
 
-    pthread_mutex_lock(&info.scanner_mutex);
     info.scan_complete = 1;
-    pthread_mutex_unlock(&info.scanner_mutex);
-	
+
     return NULL;
 }
 
@@ -308,13 +300,11 @@ void* indexerWorker(void *data) {
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
         // See if there are no more files to scan, if so, exit this indexer thread
-      
-        if (info.scan_complete && info.bbp->count == 0) {
+        if (info.scan_complete) {
             pthread_mutex_unlock(&mutex_cond.bb_mutex);
             return NULL;
         
         }
-      
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
     // Get the next filename + path from the bounded buffer
