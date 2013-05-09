@@ -10,6 +10,7 @@
 // #define LOCK
 // #define GLOBAL
 
+// Wrappers for read/write locks that handle failure
 void rwlock_rdlock(pthread_rwlock_t *lock) {
     if (pthread_rwlock_rdlock(lock)) {
         perror("pthread_rwlock_rdlock");
@@ -20,7 +21,6 @@ void rwlock_rdlock(pthread_rwlock_t *lock) {
 #endif
     }
 }
-
 void rwlock_rdunlock(pthread_rwlock_t *lock) {
     if (pthread_rwlock_unlock(lock)) {
         perror("pthread_rwlock_rdunlock");
@@ -31,7 +31,6 @@ void rwlock_rdunlock(pthread_rwlock_t *lock) {
 #endif
     }
 }
-
 void rwlock_wrlock(pthread_rwlock_t *lock) {
     if (pthread_rwlock_wrlock(lock)) {
         perror("pthread_rwlock_wrlock");
@@ -42,7 +41,6 @@ void rwlock_wrlock(pthread_rwlock_t *lock) {
 #endif
     }
 }
-
 void rwlock_wrunlock(pthread_rwlock_t *lock) {
     if (pthread_rwlock_unlock(lock)) {
         perror("pthread_rwlock_wrunlock");
