@@ -239,6 +239,7 @@ struct hashtable {
     pthread_rwlock_t globallock;
     pthread_mutex_t entrycountlock;
     pthread_rwlock_t *locks;
+    unsigned int num_locks;
 };
 
 /*****************************************************************************/
@@ -312,6 +313,7 @@ create_hashtable(unsigned int minsize,
     h->eqfn         = eqf;
     h->loadlimit    = (unsigned int) ceil(size * max_load_factor);
     h->locks        = (pthread_rwlock_t *) malloc(sizeof(pthread_rwlock_t) * size);
+    h->num_locks    = size;
 
     if (pthread_rwlock_init(&h->globallock, NULL)) {
         perror("pthread_rwlock_init");
@@ -323,6 +325,7 @@ create_hashtable(unsigned int minsize,
         return NULL;
     }
 
+    printf("creating %d fine-grained rwlocks.\n", size);
     for(int i = 0; i < size; ++i) {
         if (pthread_rwlock_init(&h->locks[i], NULL)) {
             perror("pthread_rwlock_init");
@@ -405,6 +408,18 @@ hashtable_expand(struct hashtable *h)
             }
         }
     }
+
+    // Realloc more rwlocks for newly resized table
+    printf("resizing fine-grained rwlock array to %d locks.\n", newsize);
+    h->locks = (pthread_rwlock_t *) realloc(h->locks, sizeof(pthread_rwlock_t) * newsize);
+    for(unsigned int i = h->num_locks; i < newsize; ++i) {
+        if (pthread_rwlock_init(&h->locks[i], NULL)) {
+            perror("pthread_rwlock_init");
+            return -1;
+        }
+    }
+    h->num_locks = newsize;
+
     h->tablelength = newsize;
     h->loadlimit   = (unsigned int) ceil(newsize * max_load_factor);
 #ifdef GLOBAL
@@ -548,7 +563,7 @@ hashtable_search(struct hashtable *h, void *k)
 
     // Acquire local read lock
     //printf("search: local : ");
-    //rwlock_rdlock(&h->locks[index]);
+    rwlock_rdlock(&h->locks[index]);
 
     e = h->table[index];
     while (NULL != e)
@@ -569,7 +584,7 @@ hashtable_search(struct hashtable *h, void *k)
 
     // Release local read lock
     //printf("search: local : ");
-    //rwlock_rdunlock(&h->locks[index]);
+    rwlock_rdunlock(&h->locks[index]);
 
     // Release global read lock
     //printf("search: global : ");
