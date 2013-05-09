@@ -8,7 +8,7 @@
 
 #include "index.h"
 
-// #define DEBUG
+#define DEBUG
 // #define INDEXER
 #define BOUNDED_BUFFER_SIZE 32
 
@@ -308,7 +308,7 @@ void startScanner() {
 char* get_from_buffer() {
     // Get a filename from the bounded buffer
 	char * file = info.bbp->buffer[info.bbp->use];
-#ifndef DEBUG 
+#ifdef DEBUG
     printf("[%.8x indexer] get_from_buffer[%d] '%s'\n", pthread_self(), info.bbp->use, file);
 #endif 
     // Update use index and buffer count
@@ -325,7 +325,7 @@ void* indexerWorker(void *data) {
 	char buffer[BUFFER_SIZE];
 
     GetNext: // Get the next element from the bounded buffer
-#ifndef LOCKS 
+#ifdef LOCKS
     printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
 #endif
     // Lock and wait on full condition if neccessary 
@@ -334,7 +334,7 @@ void* indexerWorker(void *data) {
         // See if there are no more files to scan, if so, exit this indexer thread
         if (info.scan_complete && info.bbp->count == 0) {
             pthread_mutex_unlock(&mutex_cond.bb_mutex);
-#ifndef DEBUG 
+#ifdef DEBUG 
             printf("[%.8x indexer] buffer empty, scan complete, exiting thread...\n", pthread_self());
 #endif 
             return NULL;
@@ -347,19 +347,19 @@ void* indexerWorker(void *data) {
 
     // Get the next filename + path from the bounded buffer
 	char *filename = get_from_buffer();
-#ifndef LOCKS 
+#ifdef LOCKS
     printf("[%.8x indexer] signalling empty condition...\n", pthread_self(), filename);
 #endif 
     // Signalling empty condition
 	pthread_cond_signal(&mutex_cond.empty);
 
-#ifndef LOCKS 
+#ifdef LOCKS
     printf("[%.8x indexer] unlocking buffer mutex...\n", pthread_self());
 #endif 
     // Unlocking buffer mutex
 	pthread_mutex_unlock(&mutex_cond.bb_mutex);
 
-#ifdef DEBUG 
+#ifdef DEBUG
     printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
 #endif 
     // Open filename from buffer and read lines
@@ -381,7 +381,7 @@ void* indexerWorker(void *data) {
         }
         ++line_number;
     }
-#ifndef DEBUG 
+#ifdef DEBUG
     printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
 #endif 
     // Cleanup file
