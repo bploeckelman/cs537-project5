@@ -59,6 +59,7 @@ char* searchfor;
 int indexcomplete;
 pthread_mutex_t filelistlock;
 pthread_cond_t  searchcomplete;
+int shutdown;
 
 
 // ----------------------------------------------------------------------------
@@ -162,10 +163,10 @@ void initialize() {
         fprintf(stderr, "Failed to initialize hashtable.\n");
         exit(1);
     }
-
+	shutdown = 0;
     initBoundedBuffer();
 	initMutexStruct(); 
-    initAdvSearchLocks();	
+    initAdvSearchLocks();
 }
 
 // ----------------------------------------------------------------------------
@@ -233,6 +234,11 @@ void* scannerWorker(void *data) {
 
     // Get filenames from files list and add to bounded buffer
 	while (NULL != fgets(line, MAXPATH, info.file_list)) {
+		if(shutdown){
+			free(line);
+			fclose(info.file_list);
+			return NULL;
+		}
         // Chomp newline from file path
 		if (line[strlen(line) - 1] == '\n')
 			line[strlen(line) - 1] = 0;
@@ -255,7 +261,7 @@ void* scannerWorker(void *data) {
             perror("pthread_mutex_unlock()");
         }
 	}
-
+	free(line);
     fclose(info.file_list);
 
     pthread_mutex_lock(&info.scanner_mutex);
@@ -290,6 +296,10 @@ char* get_from_buffer() {
 //Read files from list produced by scanner, add words to hash table
 void* indexerWorker(void *data) {
     GetNext: // Get the next element from the bounded buffer
+	
+	if(shutdown){
+		return NULL;
+	}
     // Lock and wait on full condition if neccessary 
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
@@ -505,8 +515,14 @@ void startSearch() {
     }
 }
 
+void threadDestroyerSequence(){
+	destroy = 1;
+}
+
 // ----------------------------------------------------------------------------
 void cleanup() {
+	threadDestroyerSequence();
+	
     // Join the scanner thread
     pthread_join(info.scanner_thread, NULL);
 
@@ -542,6 +558,7 @@ void cleanup() {
 	}	
 
     // TODO : cleanup other condition variables and mutexes?
+		//yeah we need to do this ^
 }
 
 
