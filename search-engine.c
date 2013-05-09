@@ -318,8 +318,15 @@ void* indexerWorker(void *data) {
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
     // Get the next filename + path from the bounded buffer
-	char *filename = get_from_buffer();
- // Open filename from buffer and read lines
+	char *filename = strdup(get_from_buffer());
+    
+    // Signalling empty condition
+	pthread_cond_signal(&mutex_cond.empty);
+
+    // Unlocking buffer mutex
+	pthread_mutex_unlock(&mutex_cond.bb_mutex);
+
+    // Open filename from buffer and read lines
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
         char buf[MAXPATH + 2];
@@ -327,12 +334,6 @@ void* indexerWorker(void *data) {
         sprintf(buf, "fopen('%s')", filename);
         perror(buf);
     }
-    // Signalling empty condition
-	pthread_cond_signal(&mutex_cond.empty);
-
-    // Unlocking buffer mutex
-	pthread_mutex_unlock(&mutex_cond.bb_mutex);
-   
 
     int line_number = 1;
     char *line = NULL;
@@ -344,6 +345,7 @@ void* indexerWorker(void *data) {
       	if(shutdown){
           free(line);
           fclose(file);
+          free(filename);
           return NULL;
         }
         // Tokenize the line into words to be inserted into index
@@ -369,7 +371,7 @@ void* indexerWorker(void *data) {
     // TODO : lock me?
     info.files_indexed++;
 	addToFileList(filename);
-
+    free(filename);
     // Go grab the next file to index from the buffer
     goto GetNext;
 
@@ -450,6 +452,7 @@ void doBasicSearch(char * word) {
         // No results found for word
 		printf("Word not found\n");
 	}
+    free(results);
 }
 
 // ----------------------------------------------------------------------------
@@ -483,6 +486,7 @@ void doAdvancedSearch(char * filename, char * word) {
     } else {
         printf("Word not found\n");
     }	
+    free(results);
 }
 
 // ----------------------------------------------------------------------------
