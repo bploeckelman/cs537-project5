@@ -532,7 +532,9 @@ void cleanup() {
 		temp = temp->next;
 		free(temp2);
 	}
-    free(searchfor);
+	if(searchfor != NULL){
+		free(searchfor);
+	}
 
     // Cleanup filename list condition variable
 	if (pthread_cond_destroy(&searchcomplete)){
@@ -548,48 +550,60 @@ void cleanup() {
 // TODO: comment and stuff
 // ----------------------------------------------------------------------------
 void addToFileList(char* filename){
+	//make a linked list node for the file to be added
 	struct stringnode* newnode = (struct stringnode*)malloc(sizeof(struct stringnode ));
 	if ((newnode->string = strdup(filename)) == NULL){
 		//mem allocation for string failed
 	}
 	newnode->next = NULL;
+	
+	//get the lock to modify the filename linked list
 	pthread_mutex_lock(&filelistlock);
+	
+	//if the linked list is empty, make the new node the head
 	if(indexedfilelist == NULL){
 		indexedfilelist = newnode;
 	}
 	else{
+		//otherwise make the linked list's tail's next node point to the newnode
 		endofindexedfilelist->next = newnode;
 	}
+	//make the newnode the tail
 	endofindexedfilelist = newnode;
+	
+	//check if a search is waiting for a file
 	if(searchfor != NULL){
+		//if yes, check if what we are indexing is the file
 		if(!strcmp(filename, searchfor)){
-			free(searchfor);
+			//if it is, signal that we have indexed that file
 			searchfor = NULL;
 			pthread_cond_signal(&searchcomplete);
-			pthread_mutex_unlock(&filelistlock);
-		}
-		else{
-			pthread_mutex_unlock(&filelistlock);
 		}
 	}
-	else{
-		pthread_mutex_unlock(&filelistlock);
-	}
+	//and then unlock the filename linked list lock
+	pthread_mutex_unlock(&filelistlock);
 }
 
 // ----------------------------------------------------------------------------
 void finishedindexing(){
+	//if the collector calls this, we check out the filename linked list lock
 	pthread_mutex_lock(&filelistlock);
+	//set the variable that indicates that the indexer threads are complete
 	indexcomplete = 1;
+	//signal the search in case it is waiting on files that will not be indexed
 	pthread_cond_signal(&searchcomplete);
 	pthread_mutex_unlock(&filelistlock);
 }
 	
 // ----------------------------------------------------------------------------
 int waitUntilFileIsIndexed(char* filename){
+	//get the indexed filenames linked list lock
 	pthread_mutex_lock(&filelistlock);
+	//grab the head of the list
 	struct stringnode* temp = indexedfilelist;
+	//iterate through the list
 	while(temp != NULL){
+		//if we find the filename, then the file is already indexed so return
 		if(!strcmp(filename, temp->string)){
 			pthread_mutex_unlock(&filelistlock);
 			//it has already been indexed
@@ -597,20 +611,23 @@ int waitUntilFileIsIndexed(char* filename){
 		}
 		temp = temp->next;
 	}
-
+	//file is not completed
 	if(indexcomplete){
+		//if indexing is complete, then our search will never succeed
 		pthread_mutex_unlock(&filelistlock);
 		return -1;
 	}
-	searchfor = strdup(filename);
+	//leave the filename here so indexers can watch for it
+	searchfor = filename;
 	pthread_cond_wait(&searchcomplete, &filelistlock);
 	
 	if (searchfor != NULL){
-		free(searchfor);
+		//was signalled because indexing finished, so search fails
 		searchfor = NULL;
 		pthread_mutex_unlock(&filelistlock);
 		return -1;
 	}
+	//was signalled because file is now indexed
 	pthread_mutex_unlock(&filelistlock);
 	return 0;
 }
