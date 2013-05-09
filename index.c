@@ -237,7 +237,7 @@ struct hashtable {
     unsigned int (*hashfn) (void *k);
     int (*eqfn) (void *k1, void *k2);
     pthread_rwlock_t globallock;
-    pthread_mutex_t entrycountlock;
+    pthread_rwlock_t entrycountlock;
     pthread_rwlock_t *locks;
     unsigned int num_locks;
 };
@@ -319,13 +319,10 @@ create_hashtable(unsigned int minsize,
         perror("pthread_rwlock_init");
         return NULL;
     }
-
-    if (pthread_mutex_init(&h->entrycountlock, NULL)) {
-        perror("pthread_mutex_init");
+    if (pthread_rwlock_init(&h->entrycountlock, NULL)) {
+        perror("pthread_rwlock_init");
         return NULL;
     }
-
-    printf("creating %d fine-grained rwlocks.\n", size);
     for(int i = 0; i < size; ++i) {
         if (pthread_rwlock_init(&h->locks[i], NULL)) {
             perror("pthread_rwlock_init");
@@ -440,20 +437,9 @@ hashtable_expand(struct hashtable *h)
 unsigned int
 hashtable_count(struct hashtable *h)
 {
-#ifdef GLOBAL
-    printf("count: global : ");
-#endif 
-    // Acquire global read lock
-    rwlock_rdlock(&h->globallock);
-
+    rwlock_rdlock(&h->entrycountlock);
     unsigned int cnt = h->entrycount;
-
-#ifdef GLOBAL
-    printf("count: global : ");
-#endif 
-    // Release global read lock
-    rwlock_rdunlock(&h->globallock);
-
+    rwlock_rdunlock(&h->entrycountlock);
     return cnt;
 }
 
@@ -465,10 +451,10 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
     unsigned int index;
     struct entry *e;
 
-    pthread_mutex_lock(&h->entrycountlock);
+    rwlock_wrlock(&h->entrycountlock);
     if (++(h->entrycount) > h->loadlimit)
     {
-        pthread_mutex_unlock(&h->entrycountlock);
+        rwlock_wrunlock(&h->entrycountlock);
 
         /* Ignore the return value. If expand fails, we should
          * still try cramming just this value into the existing table
@@ -476,14 +462,14 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
          * element may be ok. Next time we insert, we'll try expanding again.*/
         hashtable_expand(h);
     } else {
-        pthread_mutex_unlock(&h->entrycountlock);
+        rwlock_wrunlock(&h->entrycountlock);
     }
 
     e = (struct entry *)malloc(sizeof(struct entry));
     if (NULL == e) {
-        pthread_mutex_lock(&h->entrycountlock);
+        rwlock_wrlock(&h->entrycountlock);
         --(h->entrycount);
-        pthread_mutex_unlock(&h->entrycountlock);
+        rwlock_wrunlock(&h->entrycountlock);
         return 0;
     } /*oom*/
 
@@ -673,7 +659,7 @@ hashtable_destroy(struct hashtable *h, int free_values)
     if (pthread_rwlock_destroy(&h->globallock)) {
         perror("pthread_rwlock_destroy");
     }
-    if (pthread_mutex_destroy(&h->entrycountlock)) {
+    if (pthread_rwlock_destroy(&h->entrycountlock)) {
         perror("pthread_rwlock_destroy");
     }
     for(int i = 0; i < h->tablelength; ++i) {
