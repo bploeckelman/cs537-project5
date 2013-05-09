@@ -8,11 +8,11 @@
 
 #include "index.h"
 
-// #define DEBUG
-// #define LOCKS
-// #define VERBOSE
 #define BOUNDED_BUFFER_SIZE 32
 
+// ----------------------------------------------------------------------------
+// Data structures and globals
+// ----------------------------------------------------------------------------
 typedef struct bounded_buffer_s {
 	char ** buffer;
 	int fill;
@@ -48,7 +48,6 @@ typedef struct tag_info {
 } Info;
 Info info;
 
-
 struct stringnode {
     char* string;
     struct stringnode* next;
@@ -62,6 +61,9 @@ pthread_mutex_t filelistlock;
 pthread_cond_t  searchcomplete;
 
 
+// ----------------------------------------------------------------------------
+// Function forward declarations
+// ----------------------------------------------------------------------------
 void parseArgs(int argc, char *argv[]);
 void initialize();
 void startScanner();
@@ -130,14 +132,13 @@ void initBoundedBuffer() {
         // TODO : is this supposed to be MAXPATH + 2 for \n\0 ?
         memset(info.bbp->buffer[i], 0, MAXPATH);
     }
-#ifdef DEBUG
-    printf("info.bbp->buffer = %p\n", info.bbp->buffer);
-	printf("info.bbp->fill  = %d\n", info.bbp->fill);
-	printf("info.bbp->use   = %d\n", info.bbp->use);
-	printf("info.bbp->count = %d\n", info.bbp->count);
-	printf("info.bbp->done  = %d\n", info.bbp->done);
-	printf("info.bbp->size  = %d\n", info.bbp->size);
-#endif
+
+    //printf("info.bbp->buffer = %p\n", info.bbp->buffer);
+	//printf("info.bbp->fill  = %d\n", info.bbp->fill);
+	//printf("info.bbp->use   = %d\n", info.bbp->use);
+	//printf("info.bbp->count = %d\n", info.bbp->count);
+	//printf("info.bbp->done  = %d\n", info.bbp->done);
+	//printf("info.bbp->size  = %d\n", info.bbp->size);
 }
 
 //-----------------------------------------------------------------------------
@@ -235,57 +236,30 @@ void* scannerWorker(void *data) {
         // Chomp newline from file path
 		if (line[strlen(line) - 1] == '\n')
 			line[strlen(line) - 1] = 0;
-#ifdef DEBUG
-        printf("[%.8x scanner] got line '%s' from file list.\n", pthread_self(), line);
-#endif
 
-#ifdef LOCKS
-        printf("[%.8x scanner] locking buffer mutex...\n", pthread_self());
-#endif
         // Lock and wait on empty condition if neccessary 
 		if (pthread_mutex_lock(&mutex_cond.bb_mutex)) {
             perror("pthread_mutex_lock()");
         }
 		while (info.bbp->count == BOUNDED_BUFFER_SIZE) {
-#ifdef LOCKS
-            printf("[%.8x scanner] waiting on buffer empty condition...\n", pthread_self());
-#endif
 			pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex); 
 		}
 
-#ifdef DEBUG
-        printf("[%.8x scanner] add_to_buffer[%d] '%s'\n", pthread_self(), info.bbp->fill, line);
-#endif
         // Add filename + path to bounded buffer
 		add_to_buffer(line);
 
-#ifdef LOCKS
-        printf("[%.8x scanner] signalling full condition...\n", pthread_self());
-#endif
         // Signal full condition and unlock
 		pthread_cond_signal(&mutex_cond.full);
 
-#ifdef LOCKS
-        printf("[%.8x scanner] unlocking buffer mutex...\n", pthread_self());
-#endif
 		if (pthread_mutex_unlock(&mutex_cond.bb_mutex)) {
             perror("pthread_mutex_unlock()");
         }
 	}
 
-#ifdef DEBUG
-    printf("[%.8x scanner] finished fetching lines from '%s'.\n", pthread_self(), args.file_list_name);
-#endif
     fclose(info.file_list);
 
-#ifdef LOCKS
-    printf("[%.8x scanner] locking scanner mutex.\n", pthread_self());
-#endif
     pthread_mutex_lock(&info.scanner_mutex);
     info.scan_complete = 1;
-#ifdef LOCKS
-    printf("[%.8x scanner] unlocking scanner mutex.\n", pthread_self());
-#endif
     pthread_mutex_unlock(&info.scanner_mutex);
 	
     return NULL;
@@ -293,17 +267,11 @@ void* scannerWorker(void *data) {
 
 // ----------------------------------------------------------------------------
 void startScanner() {
-#ifdef DEBUG
-	printf("startScanner()\n");
-#endif
     // Create scanner thread and run it as scheduled
 	if (pthread_create(&info.scanner_thread, NULL, scannerWorker, NULL)) {
         fprintf(stderr, "Failed to create scaner thread.\n");
         exit(1);
     }
-#ifdef DEBUG
-    printf("[%.8x main] created scanner thread #0.\n", pthread_self());
-#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -312,9 +280,6 @@ void startScanner() {
 char* get_from_buffer() {
     // Get a filename from the bounded buffer
 	char * file = info.bbp->buffer[info.bbp->use];
-#ifdef DEBUG
-    printf("[%.8x indexer] get_from_buffer[%d] '%s'\n", pthread_self(), info.bbp->use, file);
-#endif
     // Update use index and buffer count
 	info.bbp->use = (info.bbp->use + 1) % info.bbp->size; 
 	info.bbp->count--;
@@ -325,43 +290,26 @@ char* get_from_buffer() {
 //Read files from list produced by scanner, add words to hash table
 void* indexerWorker(void *data) {
     GetNext: // Get the next element from the bounded buffer
-#ifdef LOCKS
-    printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
-#endif
     // Lock and wait on full condition if neccessary 
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
         // See if there are no more files to scan, if so, exit this indexer thread
         if (info.scan_complete && info.bbp->count == 0) {
             pthread_mutex_unlock(&mutex_cond.bb_mutex);
-#ifdef DEBUG 
-            printf("[%.8x indexer] buffer empty, scan complete, exiting thread...\n", pthread_self());
-#endif 
             return NULL;
         }
-#ifdef LOCKS
-        printf("[%.8x indexer] waiting on buffer full condition...\n", pthread_self());
-#endif
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
 
     // Get the next filename + path from the bounded buffer
 	char *filename = get_from_buffer();
-#ifdef LOCKS
-    printf("[%.8x indexer] signalling empty condition...\n", pthread_self(), filename);
-#endif 
+
     // Signalling empty condition
 	pthread_cond_signal(&mutex_cond.empty);
 
-#ifdef LOCKS
-    printf("[%.8x indexer] unlocking buffer mutex...\n", pthread_self());
-#endif 
     // Unlocking buffer mutex
 	pthread_mutex_unlock(&mutex_cond.bb_mutex);
 
-#ifdef DEBUG
-    printf("[%.8x indexer] opening file '%s'...\n", pthread_self(), filename);
-#endif 
     // Open filename from buffer and read lines
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
@@ -369,10 +317,6 @@ void* indexerWorker(void *data) {
         memset(buf, 0, MAXPATH + 2);
         sprintf(buf, "fopen('%s')", filename);
         perror(buf);
-    } else {
-#ifdef DEBUG
-        printf("[%.8x indexer] file '%s' opened.\n", pthread_self(), filename);
-#endif
     }
 
     int line_number = 1;
@@ -382,16 +326,10 @@ void* indexerWorker(void *data) {
 
     // Get a new line (of arbitrary length) from the file
     while ((read = getline(&line, &len, file)) != -1) {
-#ifdef DEBUG
-        printf("[%.8x indexer] line of length %zu retreived\n\t'%s'\n", pthread_self(), read, line);
-#endif
         // Tokenize the line into words to be inserted into index
         char *saveptr;
         char *word = strtok_r(line, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
         while (word != NULL) {
-#ifdef VERBOSE 
-            printf("[%.8x indexer] checking if '%s' is already in index...\n", pthread_self(), word);
-#endif
             // Insert word into index (if not already in index)
             insert_into_index(word, filename, line_number);
             word = strtok_r(NULL, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
@@ -402,11 +340,9 @@ void* indexerWorker(void *data) {
     // Cleanup memory for getline
     free(line);
 
-#ifdef DEBUG
-    printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
-#endif 
     // Cleanup file
     fclose(file);
+
     // Update list of files indexed
     // TODO : lock me?
     info.files_indexed++;
@@ -420,9 +356,6 @@ void* indexerWorker(void *data) {
 
 // ----------------------------------------------------------------------------
 void startIndexers() {
-#ifdef DEBUG
-	printf("startIndexers()\n");
-#endif
     // Allocate memory for indexer thread array
     info.indexer_threads = (pthread_t *) calloc(args.num_indexer_threads, sizeof(pthread_t));
     if (info.indexer_threads == NULL) {
@@ -434,10 +367,6 @@ void startIndexers() {
 	for (int i = 0; i < args.num_indexer_threads; ++i) {
 		if (pthread_create(&info.indexer_threads[i], NULL, indexerWorker, NULL)) {
             fprintf(stderr, "Failed to create indexer thread #%d.\n", i);
-        } else {
-#ifdef DEBUG
-            printf("[%.8x main] created indexer thread #%d.\n", pthread_self(), i);
-#endif
         }
 	}
 }
@@ -465,37 +394,21 @@ void* threadCollector(void *threadptr) {
     // Join all indexer threads to finish them cleanly
 	if (info.indexer_threads != NULL) {
         for (int i = 0; i < args.num_indexer_threads; ++i) {
-#ifdef DEBUG
-            printf("Indexer thread #%d joining...\n", i);
-#endif
             pthread_join(info.indexer_threads[i], NULL);
-#ifdef DEBUG
-            printf("Indexer thread #%d completed.\n", i);
-#endif
         }
 	}
 
 	finishedindexing();
 
-#ifdef DEBUG
-	printf("Indexing complete = %d.\n", indexcomplete);
-#endif
 	return NULL; 
 }
 
 // ----------------------------------------------------------------------------
 void startThreadCollector() {
-#ifdef DEBUG
-	printf("startThreadCollector()\n");
-#endif
     // Start collector thread that collects 
 	if (pthread_create(& info.collector_thread, NULL, threadCollector, NULL)) {
 		fprintf(stderr, "Failed to create collector thread.\n");
         exit(1);
-	} else {
-#ifdef DEBUG
-		printf("[%.8x main] created collector thread.\n", pthread_self());
-#endif
 	}
 }
 
@@ -503,10 +416,6 @@ void startThreadCollector() {
 // Search related -------------------------------------------------------------
 // ----------------------------------------------------------------------------
 void doBasicSearch(char * word) {
-#ifdef DEBUG
-	printf("input: '%s'\n", word); 
-#endif
-
     // Search for word in index and report results
 	index_search_results_t *results = find_in_index(word);
 	if (results) {
@@ -515,10 +424,6 @@ void doBasicSearch(char * word) {
 			index_search_elem_t *result = &results->results[i];
 			printf("FOUND: %s %d\n", result->file_name, result->line_number);
 		}
-
-#ifdef DEBUG
-		printf("%d results found...\n", results->num_results);
-#endif
 	} else {
         // No results found for word
 		printf("Word not found\n");
@@ -533,10 +438,6 @@ void doAdvancedSearch(char * filename, char * word) {
         printf("ERROR: File <%s> not found\n", filename);
         return;
     }
-
-#ifdef DEBUG
-    printf("input: '%s' '%s'\n", filename, word); 
-#endif
 
     // Search for word in index and report results
     index_search_results_t *results = find_in_index(word);
@@ -557,9 +458,6 @@ void doAdvancedSearch(char * filename, char * word) {
         if (count == 0) {
             printf("Word not found\n");
         }
-#ifdef DEBUG
-        printf("%d results found before filtering by filename...\n", results->num_results);
-#endif
     } else {
         printf("Word not found\n");
     }	
@@ -586,16 +484,9 @@ void startSearch() {
 
         // Get first word
 		word1 = strtok(line, " \t\n");
-#ifdef DEBUG
-		printf("word1 = '%s'\n", word1);
-#endif
-
 		if (word1 != NULL) {
             // Get second word
 			word2 = strtok(NULL, " \t\n");	
-#ifdef DEBUG
-			printf("word2 = '%s'\n", word2);
-#endif
             // Do the proper search (basic/adv.) depending on how many search terms
             if (word2 == NULL) {
                 doBasicSearch(word1);
@@ -616,27 +507,14 @@ void startSearch() {
 
 // ----------------------------------------------------------------------------
 void cleanup() {
-#ifdef DEBUG
-    printf("\n\n---------------------CLEANUP---------------------------\n\n");
-#endif
-
     // Join the scanner thread
     pthread_join(info.scanner_thread, NULL);
-#ifdef DEBUG
-    printf("Scanner thread completed.\n");
-#endif
 
     // Join collector thread (cleanly exits remaining indexer threads)
 	pthread_join(info.collector_thread, NULL);
-#ifdef DEBUG
-    printf("Collector thread completed.\n");
-#endif
 
     // Cleanup memory for indexer threads
     free(info.indexer_threads);
-#ifdef DEBUG
-    printf("\n\nTotal files indexed: %d\n", info.files_indexed);
-#endif
 
     // Cleanup bounded buffer memory
     for (int i = 0; i < BOUNDED_BUFFER_SIZE; ++i) {
@@ -699,6 +577,7 @@ void addToFileList(char* filename){
 	}
 }
 
+// ----------------------------------------------------------------------------
 void finishedindexing(){
 	pthread_mutex_lock(&filelistlock);
 	indexcomplete = 1;
@@ -706,6 +585,7 @@ void finishedindexing(){
 	pthread_mutex_unlock(&filelistlock);
 }
 	
+// ----------------------------------------------------------------------------
 int waitUntilFileIsIndexed(char* filename){
 	pthread_mutex_lock(&filelistlock);
 	struct stringnode* temp = indexedfilelist;
