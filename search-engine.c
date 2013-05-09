@@ -602,7 +602,7 @@ void startSearch() {
                 if(strtok(NULL," \t\n") == NULL) {
                     doAdvancedSearch(word1, word2);
                 } else {
-                    printf("***ERROR: Bad input\n");
+                    printf("ERROR: Bad input\n");
                 }
             }
 		}
