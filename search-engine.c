@@ -317,7 +317,6 @@ void* indexerWorker(void *data) {
       
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
-    int use = info.bbp->use;
     // Get the next filename + path from the bounded buffer
 	char *filename = get_from_buffer();
  // Open filename from buffer and read lines
@@ -352,7 +351,9 @@ void* indexerWorker(void *data) {
         char *word = strtok_r(line, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
         while (word != NULL) {
             // Insert word into index (if not already in index)
-            insert_into_index(word, filename, line_number);
+            if(strlen(word) >= 3) {
+                insert_into_index(word, filename, line_number);
+            }
             word = strtok_r(NULL, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
         }
         ++line_number;
