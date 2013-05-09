@@ -8,7 +8,7 @@
 
 // #define DEBUG
 // #define LOCK
-// #define GLOBAL 
+// #define GLOBAL
 
 void rwlock_rdlock(pthread_rwlock_t *lock) {
     if (pthread_rwlock_rdlock(lock)) {
@@ -350,7 +350,7 @@ hash(struct hashtable *h, void *k)
 static int
 hashtable_expand(struct hashtable *h)
 {
-#ifdef GLOBAL 
+#ifdef GLOBAL
     printf("expand : global : ");
 #endif 
     rwlock_wrlock(&h->globallock);
@@ -407,7 +407,7 @@ hashtable_expand(struct hashtable *h)
     }
     h->tablelength = newsize;
     h->loadlimit   = (unsigned int) ceil(newsize * max_load_factor);
-#ifdef GLOBAL 
+#ifdef GLOBAL
     printf("expand : global : ");
 #endif 
     rwlock_wrunlock(&h->globallock);
@@ -419,7 +419,7 @@ hashtable_expand(struct hashtable *h)
 unsigned int
 hashtable_count(struct hashtable *h)
 {
-#ifdef GLOBAL 
+#ifdef GLOBAL
     printf("count: global : ");
 #endif 
     rwlock_rdlock(&h->globallock);
@@ -431,7 +431,7 @@ hashtable_count(struct hashtable *h)
 
     //printf("count: entrycnt : ");
     //pthread_mutex_unlock(&h->entrycountlock);
-#ifdef GLOBAL 
+#ifdef GLOBAL
     printf("count: global : ");
 #endif 
     rwlock_rdunlock(&h->globallock);
@@ -444,7 +444,7 @@ int
 hashtable_insert(struct hashtable *h, void *k, void *v)
 {
     // Acquire global write lock
-#ifdef GLOBAL 
+#ifdef GLOBAL
     printf("insert: global : ");
 #endif 
     rwlock_wrlock(&h->globallock);
@@ -464,13 +464,17 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
         //pthread_mutex_unlock(&h->entrycountlock);
 
         // Release global write lock for expand
+#ifdef GLOBAL
         printf("insert: global : ");
+#endif
         rwlock_wrunlock(&h->globallock);
 
         hashtable_expand(h);
 
         // Acquire global write lock
+#ifdef GLOBAL
         printf("insert: global : ");
+#endif
         rwlock_wrlock(&h->globallock);
         //printf("insert: entrycnt : ");
         //pthread_mutex_lock(&h->entrycountlock);
@@ -487,7 +491,9 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
 
         //printf("insert: entrycnt : ");
         //pthread_mutex_unlock(&h->entrycountlock);
+#ifdef GLOBAL
         printf("insert: global : ");
+#endif
         rwlock_wrunlock(&h->globallock);
         return 0;
     } /*oom*/
@@ -515,7 +521,7 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
     //rwlock_wrunlock(&h->locks[index]);
 
     // Release global write lock
-#ifdef GLOBAL  
+#ifdef GLOBAL
     printf("insert: global : ");
 #endif 
     rwlock_wrunlock(&h->globallock);
@@ -581,7 +587,9 @@ void * /* returns value associated with key */
 hashtable_remove(struct hashtable *h, void *k)
 {
     // Acquire global lock
+#ifdef GLOBAL
     printf("remove: global : ");
+#endif
     rwlock_wrlock(&h->globallock);
 
     /* TODO: consider compacting the table when the load factor drops enough,
@@ -632,7 +640,9 @@ hashtable_remove(struct hashtable *h, void *k)
     //rwlock_wrunlock(&h->locks[index]);
 
     // Release global write lock
+#ifdef GLOBAL
     printf("remove: global : ");
+#endif
     rwlock_wrunlock(&h->globallock);
 
     return NULL;

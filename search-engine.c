@@ -368,7 +368,9 @@ void* indexerWorker(void *data) {
         sprintf(buf, "fopen('%s')", filename);
         perror(buf);
     } else {
+#ifdef DEBUG
         printf("[%.8x indexer] file '%s' opened.\n", pthread_self(), filename);
+#endif
     }
 
     int line_number = 1;
