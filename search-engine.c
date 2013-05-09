@@ -8,8 +8,9 @@
 
 #include "index.h"
 
-#define DEBUG
-// #define INDEXER
+// #define DEBUG
+// #define LOCKS
+// #define VERBOSE
 #define BOUNDED_BUFFER_SIZE 32
 
 typedef struct bounded_buffer_s {
@@ -71,6 +72,7 @@ void cleanup();
 void addToFileList(char* filename);
 void finishedindexing();
 int waitUntilFileIsIndexed(char* filename);
+
 
 // ----------------------------------------------------------------------------
 // Entry point ----------------------------------------------------------------
@@ -320,10 +322,6 @@ char* get_from_buffer() {
 // ----------------------------------------------------------------------------
 //Read files from list produced by scanner, add words to hash table
 void* indexerWorker(void *data) {
-    // TODO : replace fgets with getline
-	int BUFFER_SIZE = 1024;
-	char buffer[BUFFER_SIZE];
-
     GetNext: // Get the next element from the bounded buffer
 #ifdef LOCKS
     printf("[%.8x indexer] locking buffer mutex...\n", pthread_self());
@@ -364,13 +362,28 @@ void* indexerWorker(void *data) {
 #endif 
     // Open filename from buffer and read lines
     FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        char buf[MAXPATH + 2];
+        memset(buf, 0, MAXPATH + 2);
+        sprintf(buf, "fopen('%s')", filename);
+        perror(buf);
+    } else {
+        printf("[%.8x indexer] file '%s' opened.\n", pthread_self(), filename);
+    }
+
     int line_number = 1;
-    while (!feof(file)) {
-        // TODO: replace with getline()
-        fgets(buffer, MAXPATH, file);
-        // Tokenize the line into words for to be inserted into index
+    char *line = NULL;
+    size_t len = 0;
+    size_t read;
+
+    // Get a new line (of arbitrary length) from the file
+    while ((read = getline(&line, &len, file)) != -1) {
+#ifdef DEBUG
+        printf("[%.8x indexer] line of length %zu retreived\n\t'%s'\n", pthread_self(), read, line);
+#endif
+        // Tokenize the line into words to be inserted into index
         char *saveptr;
-        char *word = strtok_r(buffer, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
+        char *word = strtok_r(line, " \n\t-_!@#$%^&*()_+=,./<>?", &saveptr);
         while (word != NULL) {
 #ifdef VERBOSE 
             printf("[%.8x indexer] checking if '%s' is already in index...\n", pthread_self(), word);
@@ -381,6 +394,10 @@ void* indexerWorker(void *data) {
         }
         ++line_number;
     }
+
+    // Cleanup memory for getline
+    free(line);
+
 #ifdef DEBUG
     printf("[%.8x indexer] done indexing file '%s'.\n", pthread_self(), filename);
 #endif 
