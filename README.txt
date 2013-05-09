@@ -22,17 +22,25 @@ Known Issues:
 
 Summary:
 
-The following are locks we added to the hashtable:
+The following are locks we added to the hashtable struct which are initialized 
+in the create_hashtable() function:
 
-We added a globallock which is a read-write lock for around the hashtable. It treats
-resize as our write access and adding entries and searching as read accesses.
+We added a globallock which is a read-write lock for around the hashtable.
+This lock is acquired for writing in the hashtable_expand() function, 
+and is acquired for reading in cases where we are hashing a key or getting 
+an index into the hashtable for a key.
 
 We have an array called locks containing read-write locks for around each
 linked-list in the hashtable. They treat adding to the list as a write access
 and searching as read access of the list.
 
-We also have a mutex lock around the entrycount for the hashtable. The
-entrycount gets accessed by many functions in various places.
+We also have a read-write lock for accesses to the entrycount for the hashtable.
+The entrycount field gets accessed by several functions in various places, and 
+the lock is acquired for reading or writing as required by its use (for example, 
+it is read-locked in hashtable_count and write-locked in hashtable_insert).
+
+Usage of these locks in index.c are commented as appropriate for clarity.
+
 
 The following are locks added to search-engine.c:
 We had a mutex for the bounded buffer, so that the scanner and indexer threads
@@ -55,9 +63,3 @@ itself calls the command find ./dir_name -type f > list_name and we were
 unsure whether or not you wanted that in the Makefile as it may overwrite the
 list of files you are going to test our code on. 
 
-
-
-
-
-
-	
