@@ -39,9 +39,9 @@ PART 2
 1. 	Implements locking mechanism
 	x	single mutex for whole table
 	x/2	more sophisticated read/write lock
- 	o	fine-grain (e.g. bucket-level) lockign
+ 	x/4	fine-grain (e.g. bucket-level) lockign
 
-2. 	o? - bounded buffer is implemented/used correctly
+2. 	x - bounded buffer is implemented/used correctly
 3.	x	Waits for threads to exit before terminating program
 
 4. 	o - Code is neat, documented, and easy to understand
@@ -50,9 +50,11 @@ PART 2
 Issues to fix:
 1. Advanced search - not finding words in file grade_files/c. IS finding it
 for files a and b. 
-
 2. Appears that the first file in the file list is not getting indexed. 
-
+3. In hashtable_insert, we have to use these fine-grained locks but grab as write locks (uncomment the stuff that's there)
+4. A little more commenting
+5. Write up a summary of how we do the fine-grained locks in the README.txt
+ 
 
 Known Issues:
 
