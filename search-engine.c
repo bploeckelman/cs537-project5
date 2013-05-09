@@ -336,6 +336,11 @@ void* indexerWorker(void *data) {
 
     // Get a new line (of arbitrary length) from the file
     while ((read = getline(&line, &len, file)) != -1) {
+      	if(shutdown){
+          free(line);
+          fclose(file);
+          return NULL;
+        }
         // Tokenize the line into words to be inserted into index
         char *saveptr;
         char *word = strtok_r(line, " \n\t-_!@#$%^&*()[]{}:;_+=,./<>?", &saveptr);
@@ -494,6 +499,7 @@ void startSearch() {
 
         // Get first word
 		word1 = strtok(line, " \t\n");
+
 		if (word1 != NULL) {
             // Get second word
 			word2 = strtok(NULL, " \t\n");	
@@ -513,10 +519,11 @@ void startSearch() {
         // Clear input buffer for next search
         memset(line, 0, sizeof(char) * BUFFER_SIZE);
     }
+
 }
 
 void threadDestroyerSequence(){
-	destroy = 1;
+	shutdown = 1;
 }
 
 // ----------------------------------------------------------------------------
@@ -556,7 +563,6 @@ void cleanup() {
 	if (pthread_cond_destroy(&searchcomplete)){
 		perror("pthread_cond_destroy");
 	}	
-
     // TODO : cleanup other condition variables and mutexes?
 		//yeah we need to do this ^
 }
