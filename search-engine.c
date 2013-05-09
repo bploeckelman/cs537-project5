@@ -217,6 +217,7 @@ void parseArgs(int argc, char *argv[]) {
 void add_to_buffer(char * filename) {
     // Copy the specified filename into the bounded buffer
     strcpy(info.bbp->buffer[info.bbp->fill], filename);
+
     // Update fill index and buffer count
 	info.bbp->fill = (info.bbp->fill + 1) % info.bbp->size;
 	info.bbp->count++;
@@ -251,7 +252,10 @@ void* scannerWorker(void *data) {
 			pthread_cond_wait(&mutex_cond.empty, &mutex_cond.bb_mutex); 
 		}
 
+        // printf("filename = %s \n", line);
         // Add filename + path to bounded buffer
+
+        // printf("filename = %s\n", line);
 		add_to_buffer(line);
 
         // Signal full condition and unlock
@@ -285,7 +289,7 @@ void startScanner() {
 // ----------------------------------------------------------------------------
 char* get_from_buffer() {
     // Get a filename from the bounded buffer
-	char * file = info.bbp->buffer[info.bbp->use];
+  char * file = strdup(info.bbp->buffer[info.bbp->use]);
     // Update use index and buffer count
 	info.bbp->use = (info.bbp->use + 1) % info.bbp->size; 
 	info.bbp->count--;
@@ -304,23 +308,19 @@ void* indexerWorker(void *data) {
 	pthread_mutex_lock(&mutex_cond.bb_mutex);
     while (info.bbp->count == 0) {
         // See if there are no more files to scan, if so, exit this indexer thread
+      
         if (info.scan_complete && info.bbp->count == 0) {
             pthread_mutex_unlock(&mutex_cond.bb_mutex);
             return NULL;
+        
         }
+      
 		pthread_cond_wait(&mutex_cond.full, &mutex_cond.bb_mutex);
 	}
-
+    int use = info.bbp->use;
     // Get the next filename + path from the bounded buffer
 	char *filename = get_from_buffer();
-
-    // Signalling empty condition
-	pthread_cond_signal(&mutex_cond.empty);
-
-    // Unlocking buffer mutex
-	pthread_mutex_unlock(&mutex_cond.bb_mutex);
-
-    // Open filename from buffer and read lines
+ // Open filename from buffer and read lines
     FILE *file = fopen(filename, "r");
     if (file == NULL) {
         char buf[MAXPATH + 2];
@@ -328,6 +328,12 @@ void* indexerWorker(void *data) {
         sprintf(buf, "fopen('%s')", filename);
         perror(buf);
     }
+    // Signalling empty condition
+	pthread_cond_signal(&mutex_cond.empty);
+
+    // Unlocking buffer mutex
+	pthread_mutex_unlock(&mutex_cond.bb_mutex);
+   
 
     int line_number = 1;
     char *line = NULL;
