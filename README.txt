@@ -4,8 +4,7 @@
 *@prof: Dr. Michael Swift
 *@ta: Collin Engstrom 
 *@proj: P5 - Desktop Search Engine
-*@due: May 9th, 2013
-*
+*@due: May 9th, 2013*
 *@name: Joseph Francke
 *@login: francke   
 *
@@ -44,11 +43,17 @@ was ok to produce/consume.
 We also had a mutex called filelistlock that covered our list of indexed
 files (we used this list for advanced search). 
 
+Notes:
+
 Something to note is that we used a scanner, indexer threads, and the main
 thread handles searching, however we also create a thread named 
 collect_thread that joins indexer threads in the background and sets the
 variable indexcomplete to 1 when all the indexer threads have completed.
- 
+
+The Makefile has a line commented out that calls a script listgen.sh that
+itself calls the command find ./dir_name -type f > list_name and we were
+unsure whether or not you wanted that in the Makefile as it may overwrite the
+list of files you are going to test our code on. 
 
 
 
