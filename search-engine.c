@@ -526,7 +526,7 @@ void doAdvancedSearch(char * filename, char * word) {
     // If file hasn't been indexed yet, wait to complete search until it is
     if (-1 == waitUntilFileIsIndexed(filename)) {
         // Indexing complete, specified file not found
-        printf("File '%s' not found.\n", filename);
+        printf("ERROR: File <%s> not found\n", filename);
         return;
     }
 
