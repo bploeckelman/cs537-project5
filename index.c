@@ -364,7 +364,10 @@ hashtable_expand(struct hashtable *h)
     struct entry **pE;
     unsigned int newsize, i, index;
     /* Check we're not hitting max capacity */
-    if (h->primeindex == (prime_table_length - 1)) return 0;
+    if (h->primeindex == (prime_table_length - 1)) {
+        rwlock_wrunlock(&h->globallock);
+        return 0;
+    }
     newsize = primes[++(h->primeindex)];
 
     newtable = (struct entry **)malloc(sizeof(struct entry*) * newsize);
@@ -410,18 +413,21 @@ hashtable_expand(struct hashtable *h)
     }
 
     // Realloc more rwlocks for newly resized table
+#ifdef DEBUG
     printf("resizing fine-grained rwlock array to %d locks.\n", newsize);
+#endif
     h->locks = (pthread_rwlock_t *) realloc(h->locks, sizeof(pthread_rwlock_t) * newsize);
     for(unsigned int i = h->num_locks; i < newsize; ++i) {
         if (pthread_rwlock_init(&h->locks[i], NULL)) {
             perror("pthread_rwlock_init");
-            return -1;
+            exit(1);
         }
     }
     h->num_locks = newsize;
 
     h->tablelength = newsize;
     h->loadlimit   = (unsigned int) ceil(newsize * max_load_factor);
+
 #ifdef GLOBAL
     printf("expand : global : ");
 #endif 
@@ -437,18 +443,15 @@ hashtable_count(struct hashtable *h)
 #ifdef GLOBAL
     printf("count: global : ");
 #endif 
+    // Acquire global read lock
     rwlock_rdlock(&h->globallock);
-
-    //printf("count: entrycnt : ");
-    //pthread_mutex_lock(&h->entrycountlock);
 
     unsigned int cnt = h->entrycount;
 
-    //printf("count: entrycnt : ");
-    //pthread_mutex_unlock(&h->entrycountlock);
 #ifdef GLOBAL
     printf("count: global : ");
 #endif 
+    // Release global read lock
     rwlock_rdunlock(&h->globallock);
 
     return cnt;
@@ -459,86 +462,76 @@ int
 hashtable_insert(struct hashtable *h, void *k, void *v)
 {
     // Acquire global write lock
-#ifdef GLOBAL
-    printf("insert: global : ");
-#endif 
     rwlock_wrlock(&h->globallock);
 
     /* This method allows duplicate keys - but they shouldn't be used */
     unsigned int index;
     struct entry *e;
-    //printf("insert: entrycnt : ");
     //pthread_mutex_lock(&h->entrycountlock);
     if (++(h->entrycount) > h->loadlimit)
     {
+        //pthread_mutex_unlock(&h->entrycountlock);
+
         /* Ignore the return value. If expand fails, we should
          * still try cramming just this value into the existing table
          * -- we may not have memory for a larger table, but one more
          * element may be ok. Next time we insert, we'll try expanding again.*/
-        //printf("insert: entrycnt : ");
-        //pthread_mutex_unlock(&h->entrycountlock);
 
         // Release global write lock for expand
-#ifdef GLOBAL
-        printf("insert: global : ");
-#endif
         rwlock_wrunlock(&h->globallock);
 
         hashtable_expand(h);
 
-        // Acquire global write lock
-#ifdef GLOBAL
-        printf("insert: global : ");
-#endif
+        // Reacquire global write lock
         rwlock_wrlock(&h->globallock);
-        //printf("insert: entrycnt : ");
-        //pthread_mutex_lock(&h->entrycountlock);
+    } else {
+        //pthread_mutex_unlock(&h->entrycountlock);
     }
-    //printf("insert: entrycnt : ");
-    //pthread_mutex_unlock(&h->entrycountlock);
 
     e = (struct entry *)malloc(sizeof(struct entry));
     if (NULL == e) {
-        //printf("insert: entrycnt : ");
         //pthread_mutex_lock(&h->entrycountlock);
-
         --(h->entrycount);
-
-        //printf("insert: entrycnt : ");
         //pthread_mutex_unlock(&h->entrycountlock);
-#ifdef GLOBAL
-        printf("insert: global : ");
-#endif
+
+        // Release global write lock
         rwlock_wrunlock(&h->globallock);
         return 0;
     } /*oom*/
 
+    // Release global write lock
+    rwlock_wrunlock(&h->globallock);
+
     // Acquire global read lock
-    //printf("insert: global : ");
-    //rwlock_rdlock(&h->globallock);
+    rwlock_rdlock(&h->globallock);
 
     e->h = hash(h,k);
     index = indexFor(h->tablelength,e->h);
     e->k = k;
     e->v = v;
 
+    // Release global read lock
+    rwlock_rdunlock(&h->globallock);
+
     // Acquire internal write lock
-    //printf("insert: local : ");
+    // TODO: causes problems
     //rwlock_wrlock(&h->locks[index]);
+
+    // Acquire global write lock
+    rwlock_wrlock(&h->globallock);
+
 #ifdef DEBUG 
     printf("[%.8x indexer] inserting '%s' into index...\n", pthread_self(), k);
 #endif 
     e->next = h->table[index];
     h->table[index] = e;
 
-    // Release internal write lock
     //printf("insert: local : ");
+    // Release internal write lock
+    // TODO: causes problems
     //rwlock_wrunlock(&h->locks[index]);
 
     // Release global write lock
-#ifdef GLOBAL
-    printf("insert: global : ");
-#endif 
     rwlock_wrunlock(&h->globallock);
 
     return -1;
