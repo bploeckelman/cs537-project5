@@ -312,9 +312,11 @@ create_hashtable(unsigned int minsize,
     h->hashfn       = hashf;
     h->eqfn         = eqf;
     h->loadlimit    = (unsigned int) ceil(size * max_load_factor);
+    // Allocate space for fine-grained locks
     h->locks        = (pthread_rwlock_t *) malloc(sizeof(pthread_rwlock_t) * size);
     h->num_locks    = size;
 
+    // Initialize locks
     if (pthread_rwlock_init(&h->globallock, NULL)) {
         perror("pthread_rwlock_init");
         return NULL;
@@ -350,9 +352,7 @@ hash(struct hashtable *h, void *k)
 static int
 hashtable_expand(struct hashtable *h)
 {
-#ifdef GLOBAL
-    printf("expand : global : ");
-#endif 
+    // Acquire global write lock for entire function
     rwlock_wrlock(&h->globallock);
 
     /* Double the size of the table to accomodate more entries */
@@ -362,6 +362,7 @@ hashtable_expand(struct hashtable *h)
     unsigned int newsize, i, index;
     /* Check we're not hitting max capacity */
     if (h->primeindex == (prime_table_length - 1)) {
+        // Release global write lock for early return
         rwlock_wrunlock(&h->globallock);
         return 0;
     }
@@ -389,7 +390,12 @@ hashtable_expand(struct hashtable *h)
     {
         newtable = (struct entry **)
                    realloc(h->table, newsize * sizeof(struct entry *));
-        if (NULL == newtable) { (h->primeindex)--; return 0; }
+        if (NULL == newtable) {
+            (h->primeindex)--;
+            // Release global write lock for early return
+            rwlock_wrunlock(&h->globallock);
+            return 0;
+        }
         h->table = newtable;
         memset(newtable[h->tablelength], 0, newsize - h->tablelength);
         for (i = 0; i < h->tablelength; i++) {
@@ -409,10 +415,10 @@ hashtable_expand(struct hashtable *h)
         }
     }
 
-    // Realloc more rwlocks for newly resized table
 #ifdef DEBUG
     printf("resizing fine-grained rwlock array to %d locks.\n", newsize);
 #endif
+    // Realloc more rwlocks for newly resized table
     h->locks = (pthread_rwlock_t *) realloc(h->locks, sizeof(pthread_rwlock_t) * newsize);
     for(unsigned int i = h->num_locks; i < newsize; ++i) {
         if (pthread_rwlock_init(&h->locks[i], NULL)) {
@@ -425,9 +431,7 @@ hashtable_expand(struct hashtable *h)
     h->tablelength = newsize;
     h->loadlimit   = (unsigned int) ceil(newsize * max_load_factor);
 
-#ifdef GLOBAL
-    printf("expand : global : ");
-#endif 
+    // Release global write lock
     rwlock_wrunlock(&h->globallock);
 
     return -1;
@@ -437,6 +441,7 @@ hashtable_expand(struct hashtable *h)
 unsigned int
 hashtable_count(struct hashtable *h)
 {
+    // Use read lock for entry count
     rwlock_rdlock(&h->entrycountlock);
     unsigned int cnt = h->entrycount;
     rwlock_rdunlock(&h->entrycountlock);
@@ -451,6 +456,7 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
     unsigned int index;
     struct entry *e;
 
+    // Use write lock for entry count increment 
     rwlock_wrlock(&h->entrycountlock);
     if (++(h->entrycount) > h->loadlimit)
     {
@@ -467,42 +473,33 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
 
     e = (struct entry *)malloc(sizeof(struct entry));
     if (NULL == e) {
+        // Use write lock for entry count decrement 
         rwlock_wrlock(&h->entrycountlock);
         --(h->entrycount);
         rwlock_wrunlock(&h->entrycountlock);
         return 0;
     } /*oom*/
 
-    // Acquire global read lock
+    // Use global read lock for hashing/index calculations
     rwlock_rdlock(&h->globallock);
-
     e->h = hash(h,k);
     index = indexFor(h->tablelength,e->h);
     e->k = k;
     e->v = v;
-
-    // Release global read lock
     rwlock_rdunlock(&h->globallock);
 
-    // Acquire global write lock
-    rwlock_wrlock(&h->globallock);
-
-    // Acquire internal write lock
-    // TODO: causes problems, figure out why
+    // Use global write lock for list insertion
+    // TODO: internal lock causes problems, figure out why, using global instead
     //rwlock_wrlock(&h->locks[index]);
-
+    rwlock_wrlock(&h->globallock);
 #ifdef DEBUG 
     printf("[%.8x indexer] inserting '%s' into index[%d]...\n", pthread_self(), k, index);
 #endif 
     e->next = h->table[index];
     h->table[index] = e;
-
-    // Release internal write lock
-    // TODO: causes problems, figure out why
-    //rwlock_wrunlock(&h->locks[index]);
-
-    // Release global write lock
     rwlock_wrunlock(&h->globallock);
+    // TODO: internal lock causes problems, figure out why, using global instead
+    //rwlock_wrunlock(&h->locks[index]);
 
     return -1;
 }
@@ -511,65 +508,40 @@ hashtable_insert(struct hashtable *h, void *k, void *v)
 void * /* returns value associated with key */
 hashtable_search(struct hashtable *h, void *k)
 {
-    // Acquire global read lock
-    //printf("search: global : ");
-    //rwlock_rdlock(&h->globallock);
-    if (pthread_rwlock_rdlock(&h->globallock)) {
-        perror("pthread_rwlock_rdlock");
-        exit(1);
-    }
-
     struct entry *e;
     unsigned int hashvalue, index;
+
+    // Use global read lock for hashing/indexing
+    rwlock_rdlock(&h->globallock);
     hashvalue = hash(h,k);
     index = indexFor(h->tablelength,hashvalue);
+    rwlock_rdunlock(&h->globallock);
 
-    // Acquire local read lock
-    //printf("search: local : ");
+    // Use local read lock for searching
     rwlock_rdlock(&h->locks[index]);
-
     e = h->table[index];
     while (NULL != e)
     {
         /* Check hash value to short circuit heavier comparison */
         if ((hashvalue == e->h) && (h->eqfn(k, e->k))) {
-            // Release global read lock
-            //printf("search: global : ");
-            //rwlock_rdunlock(&h->globallock);
-            if (pthread_rwlock_unlock(&h->globallock)) {
-                perror("pthread_rwlock_unlock");
-                exit(1);
-            }
+            // Release local read lock for early return (key found)
+            rwlock_rdunlock(&h->locks[index]);
             return e->v;
         }
         e = e->next;
     }
-
-    // Release local read lock
-    //printf("search: local : ");
+    // Release local read lock for late return (key not found)
     rwlock_rdunlock(&h->locks[index]);
-
-    // Release global read lock
-    //printf("search: global : ");
-    //rwlock_rdunlock(&h->globallock);
-    if (pthread_rwlock_unlock(&h->globallock)) {
-        perror("pthread_rwlock_unlock");
-        exit(1);
-    }
 
     return NULL;
 }
+
+
 
 /*****************************************************************************/
 void * /* returns value associated with key */
 hashtable_remove(struct hashtable *h, void *k)
 {
-    // Acquire global lock
-#ifdef GLOBAL
-    printf("remove: global : ");
-#endif
-    rwlock_wrlock(&h->globallock);
-
     /* TODO: consider compacting the table when the load factor drops enough,
      *       or provide a 'compact' method. */
 
@@ -578,17 +550,14 @@ hashtable_remove(struct hashtable *h, void *k)
     void *v;
     unsigned int hashvalue, index;
 
-    // Acquire global lock
-    //printf("remove: global : ");
-    //rwlock_wrlock(&h->globallock);
-
+    // Use global read lock for hashing/indexing
+    rwlock_rdlock(&h->globallock);
     hashvalue = hash(h,k);
     index = indexFor(h->tablelength,hash(h,k));
+    rwlock_rdunlock(&h->globallock);
 
-    // Acquire local write lock
-    //printf("remove: local : ");
-    //rwlock_wrlock(&h->locks[index]);
-
+    // Use local write lock for removal
+    rwlock_wrlock(&h->locks[index]);
     pE = &(h->table[index]);
     e = *pE;
     while (NULL != e)
@@ -597,31 +566,23 @@ hashtable_remove(struct hashtable *h, void *k)
         if ((hashvalue == e->h) && (h->eqfn(k, e->k)))
         {
             *pE = e->next;
-            //printf("remove: entrycnt : ");
-            //pthread_mutex_lock(&h->entrycountlock);
 
+            // Use write lock for entry count decrement
+            rwlock_wrlock(&h->entrycountlock);
             h->entrycount--;
+            rwlock_wrunlock(&h->entrycountlock);
 
-            //printf("remove: entrycnt : ");
-            //pthread_mutex_unlock(&h->entrycountlock);
             v = e->v;
             freekey(e->k);
             free(e);
+
+            rwlock_wrunlock(&h->locks[index]);
             return v;
         }
         pE = &(e->next);
         e = e->next;
     }
-
-    // Release local write lock
-    //printf("remove: local : ");
-    //rwlock_wrunlock(&h->locks[index]);
-
-    // Release global write lock
-#ifdef GLOBAL
-    printf("remove: global : ");
-#endif
-    rwlock_wrunlock(&h->globallock);
+    rwlock_wrunlock(&h->locks[index]);
 
     return NULL;
 }
